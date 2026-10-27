@@ -1,0 +1,131 @@
+using HoneyErpAPI.Common;
+
+namespace HoneyErpAPI.Models
+{
+    // ── Raw Material List ─────────────────────────────────────────────────────
+    public class GetRawMaterialListReq : BaseApiRequest
+    {
+        public int PageNumber { get; set; } = 1;
+        public int PageSize   { get; set; } = 10;
+    }
+
+    public class GetRawMaterialListRes : BaseApiResponse
+    {
+        public List<RawMaterialListItem> Items      { get; set; } = new();
+        public int                       TotalCount { get; set; }
+        public int                       PageNumber { get; set; }
+        public int                       PageSize   { get; set; }
+        public int TotalPages => PageSize > 0 ? (int)Math.Ceiling(TotalCount / (double)PageSize) : 0;
+    }
+
+    public class RawMaterialListItem
+    {
+        public string  Edid         { get; set; } = string.Empty;
+        public string  Name         { get; set; } = string.Empty;
+        public string  Category     { get; set; } = string.Empty;
+        public string  UnitEdid     { get; set; } = string.Empty;
+        public decimal Stock        { get; set; }
+        public decimal MinQuantity  { get; set; }
+        public decimal ReorderLevel { get; set; }
+    }
+
+    // ── Get Raw Material by Id ────────────────────────────────────────────────
+    public class GetRawMaterialByIdRes : BaseApiResponse
+    {
+        public string  Edid         { get; set; } = string.Empty;
+        public string  Name         { get; set; } = string.Empty;
+        public string  Category     { get; set; } = string.Empty;
+        public string  UnitEdid     { get; set; } = string.Empty;
+        public decimal Stock        { get; set; }
+        public decimal MinQuantity  { get; set; }
+        public decimal ReorderLevel { get; set; }
+    }
+
+    // ── Save Raw Material ─────────────────────────────────────────────────────
+    public class AddRawMaterialReq : BaseApiRequest
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Category { get; set; } = string.Empty;
+        public string  UnitEdid { get; set; } = string.Empty;
+        public decimal Stock { get; set; }
+        public decimal MinQuantity { get; set; }
+        public decimal ReorderLevel { get; set; }
+    }
+
+    public class AddRawMaterialRes : BaseApiResponse
+    {
+        public string Edid { get; set; } = string.Empty;
+    }
+
+    public class EditRawMaterialReq : BaseApiRequest
+    {
+        public string  Name         { get; set; } = string.Empty;
+        public string  Category     { get; set; } = string.Empty;
+        public string  UnitEdid     { get; set; } = string.Empty;
+        public decimal Stock        { get; set; }
+        public decimal MinQuantity  { get; set; }
+        public decimal ReorderLevel { get; set; }
+    }
+
+    public class EditRawMaterialRes : BaseApiResponse { }
+
+    // ── Recipe ────────────────────────────────────────────────────────────────
+    public class GetRecipeRes : BaseApiResponse
+    {
+        public List<RecipeItemLine> Items { get; set; } = new();
+    }
+
+    public class RecipeItemLine
+    {
+        public string  MaterialEdid { get; set; } = string.Empty;
+        public decimal Qty          { get; set; }
+        public bool    IsPacking    { get; set; }
+    }
+
+    public class SaveRecipeReq : BaseApiRequest
+    {
+        public List<SaveRecipeItemLine> Items { get; set; } = new();
+    }
+
+    public class SaveRecipeItemLine
+    {
+        public string  MaterialEdid { get; set; } = string.Empty;
+        public decimal Qty          { get; set; }
+        public bool    IsPacking    { get; set; }
+    }
+
+    public class SaveRecipeRes : BaseApiResponse { }
+
+    // ── Category ──────────────────────────────────────────────────────────────
+    public class GetCategoryListReq : BaseApiRequest
+    {
+        public int PageNumber { get; set; } = 1;
+        public int PageSize   { get; set; } = 10;
+        public string? Name   { get; set; }
+    }
+
+    public class GetCategoryListRes : BaseApiResponse
+    {
+        public List<CategoryListItem> Items { get; set; } = new();
+        public int TotalCount { get; set; }
+        public int PageNumber { get; set; }
+        public int PageSize   { get; set; }
+        public int TotalPages => PageSize > 0 ? (int)Math.Ceiling(TotalCount / (double)PageSize) : 0;
+    }
+
+    public class CategoryListItem
+    {
+        public string Edid { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+    }
+
+    public class AddCategoryReq : BaseApiRequest
+    {
+        public string Name { get; set; } = string.Empty;
+    }
+
+    public class AddCategoryRes : BaseApiResponse
+    {
+        public string Edid { get; set; } = string.Empty;
+    }
+}

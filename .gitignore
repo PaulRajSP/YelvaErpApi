@@ -1,0 +1,23 @@
+## Visual Studio and .NET Build Artifacts
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+*.exe
+*.dll
+*.pdb
+
+## Visual Studio Cache and User Specific Files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vscode/
+
+## Publish and Package directories
+publish/
+*.nupkg
+
+## Appsettings with secrets (optional override)
+# appsettings.Production.json
