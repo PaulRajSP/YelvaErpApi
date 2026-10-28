@@ -32,9 +32,11 @@ namespace HoneyErpAPI.Repository
 
             string query = @"SELECT COUNT(*) OVER() AS TotalRecords, p.id, p.docId, p.supplierId,
                             s.name AS supplierName, p.date, p.totalAmount, p.status,
-                            p.paidAmount, (p.totalAmount - p.paidAmount) AS balance
+                            p.paidAmount, (p.totalAmount - p.paidAmount) AS balance,
+                            a.originalName AS documentOriginalName
                      FROM PurchaseMaster p
                      INNER JOIN SupplierMaster s ON p.supplierId = s.id
+                     LEFT JOIN AttachmentMaster a ON p.docId = a.id
                      WHERE (@Status IS NULL OR p.status = @Status)
                        AND (@FromDate IS NULL OR CAST(p.date AS DATE) >= CAST(@FromDate AS DATE))
                        AND (@ToDate IS NULL OR CAST(p.date AS DATE) <= CAST(@ToDate AS DATE))
@@ -63,6 +65,7 @@ namespace HoneyErpAPI.Repository
             {
                 int? docId = (dt.Columns.Contains("docId") && !row.IsNull("docId")) ? Convert.ToInt32(row["docId"]) : (int?)null;
                 string? docEdid = docId.HasValue ? EncryptionHelper.Encrypt(docId.Value.ToString()) : null;
+                string? docOriginalName = (dt.Columns.Contains("documentOriginalName") && !row.IsNull("documentOriginalName")) ? row.Field<string>("documentOriginalName") : null;
 
                 res.Items.Add(new PurchaseListItem
                 {
@@ -75,8 +78,11 @@ namespace HoneyErpAPI.Repository
                     PaidAmount = row.Field<decimal>("paidAmount"),
                     Balance = Convert.ToDecimal(row["balance"]),
                     Status = (Convert.ToDecimal(row["balance"]) <= 0 && row.Field<decimal>("totalAmount") > 0) ? "PAID" : row.Field<string>("status")!,
-                    DocId = docId,
-                    DocEdid = docEdid
+                    AttachmentData = !string.IsNullOrWhiteSpace(docEdid) ? new DocumentModel
+                    {
+                        DocumentEdid = docEdid,
+                        DocumentOriginalName = docOriginalName
+                    } : null
                 });
             }
 
@@ -91,9 +97,11 @@ namespace HoneyErpAPI.Repository
 
             string query = @"SELECT COUNT(*) OVER() AS TotalRecords, p.id, p.docId, p.supplierId, s.name AS supplierName,
                             p.date, p.totalAmount, p.status, p.paidAmount,
-                            (p.totalAmount - p.paidAmount) AS balance
+                            (p.totalAmount - p.paidAmount) AS balance,
+                            a.originalName AS documentOriginalName
                      FROM PurchaseMaster p
                      INNER JOIN SupplierMaster s ON p.supplierId = s.id
+                     LEFT JOIN AttachmentMaster a ON p.docId = a.id
                      WHERE p.supplierId = @SupplierId
                        AND (@FromDate IS NULL OR CAST(p.date AS DATE) >= CAST(@FromDate AS DATE))
                        AND (@ToDate IS NULL OR CAST(p.date AS DATE) <= CAST(@ToDate AS DATE))
@@ -122,6 +130,7 @@ namespace HoneyErpAPI.Repository
             {
                 int? docId = (dt.Columns.Contains("docId") && !row.IsNull("docId")) ? Convert.ToInt32(row["docId"]) : (int?)null;
                 string? docEdid = docId.HasValue ? EncryptionHelper.Encrypt(docId.Value.ToString()) : null;
+                string? docOriginalName = (dt.Columns.Contains("documentOriginalName") && !row.IsNull("documentOriginalName")) ? row.Field<string>("documentOriginalName") : null;
 
                 res.Items.Add(new PurchaseListItem
                 {
@@ -132,8 +141,11 @@ namespace HoneyErpAPI.Repository
                     PaidAmount = row.Field<decimal>("paidAmount"),
                     Balance = Convert.ToDecimal(row["balance"]),
                     Status = (Convert.ToDecimal(row["balance"]) <= 0 && row.Field<decimal>("totalAmount") > 0) ? "PAID" : row.Field<string>("status")!,
-                    DocId = docId,
-                    DocEdid = docEdid
+                    AttachmentData = !string.IsNullOrWhiteSpace(docEdid) ? new DocumentModel
+                    {
+                        DocumentEdid = docEdid,
+                        DocumentOriginalName = docOriginalName
+                    } : null
                 });
             }
 
@@ -146,9 +158,11 @@ namespace HoneyErpAPI.Repository
 
             string query = @"SELECT p.id, p.docId, p.supplierId, s.name AS supplierName, p.date,
                             p.totalAmount, p.status, p.paidAmount,
-                            (p.totalAmount - p.paidAmount) AS balance
+                            (p.totalAmount - p.paidAmount) AS balance,
+                            a.originalName AS documentOriginalName
                      FROM PurchaseMaster p
                      INNER JOIN SupplierMaster s ON p.supplierId = s.id
+                     LEFT JOIN AttachmentMaster a ON p.docId = a.id
                      WHERE p.id = @Id";
 
             DataTable dt = _client.ExecuteAdapter(query, p, CommandType.Text).Tables[0];
@@ -158,6 +172,7 @@ namespace HoneyErpAPI.Repository
             DataRow row = dt.Rows[0];
             int? docId = (dt.Columns.Contains("docId") && !row.IsNull("docId")) ? Convert.ToInt32(row["docId"]) : (int?)null;
             string? docEdid = docId.HasValue ? EncryptionHelper.Encrypt(docId.Value.ToString()) : null;
+            string? docOriginalName = (dt.Columns.Contains("documentOriginalName") && !row.IsNull("documentOriginalName")) ? row.Field<string>("documentOriginalName") : null;
 
             return new GetPurchaseByIdRes
             {
@@ -170,8 +185,11 @@ namespace HoneyErpAPI.Repository
                 PaidAmount = row.Field<decimal>("paidAmount"),
                 Balance = Convert.ToDecimal(row["balance"]),
                 Status = (Convert.ToDecimal(row["balance"]) <= 0 && row.Field<decimal>("totalAmount") > 0) ? "PAID" : row.Field<string>("status")!,
-                DocId = docId,
-                DocEdid = docEdid
+                AttachmentData = !string.IsNullOrWhiteSpace(docEdid) ? new DocumentModel
+                {
+                    DocumentEdid = docEdid,
+                    DocumentOriginalName = docOriginalName
+                } : null
             };
         }
 
@@ -181,13 +199,14 @@ namespace HoneyErpAPI.Repository
 
             req.Purchase.Balance = req.Purchase.TotalAmount - req.Purchase.PaidAmount;
 
-            int? docId = req.Purchase.DocId;
-            if (!docId.HasValue && !string.IsNullOrWhiteSpace(req.Purchase.DocEdid))
+            int? docId = null;
+            string? docEdid = req.Purchase.AttachmentData?.DocumentEdid;
+            if (!string.IsNullOrWhiteSpace(docEdid))
             {
-                string decrypted = EncryptionHelper.Decrypt(req.Purchase.DocEdid);
+                string decrypted = EncryptionHelper.Decrypt(docEdid);
                 if (int.TryParse(decrypted, out int parsedId))
                     docId = parsedId;
-                else if (int.TryParse(req.Purchase.DocEdid, out int rawId))
+                else if (int.TryParse(docEdid, out int rawId))
                     docId = rawId;
             }
 

@@ -1,3 +1,5 @@
+using HoneyErpAPI.Common;
+
 namespace HoneyErpAPI.Models
 {
     public class EnumListResponse
@@ -12,9 +14,10 @@ namespace HoneyErpAPI.Models
         public string FilePath { get; set; } = string.Empty;
     }
 
-    public class AddAttachmentRes : HoneyErpAPI.Common.BaseApiResponse
+    public class DocumentModel: BaseApiResponse
     {
-        public string Edid { get; set; } = string.Empty;
+        public string? DocumentEdid { get; set; }
+        public string? DocumentOriginalName { get; set; }
     }
 
     public class FileUploadReq

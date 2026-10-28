@@ -31,7 +31,7 @@ namespace HoneyErpAPI.Models
         public string?  Email         { get; set; }
         public string?  Address       { get; set; }
         public bool     IsActive      { get; set; }
-        public string?  DocEdid       { get; set; }
+        public DocumentModel? AttachmentData { get; set; }
         public List<CourierMetadataItem> Metadata { get; set; } = new();
     }
 
@@ -51,8 +51,7 @@ namespace HoneyErpAPI.Models
         public string? Mobile        { get; set; }
         public string? Email         { get; set; }
         public string? Address       { get; set; }
-        public string? DocId         { get; set; }
-        public string? DocEdid       { get; set; }
+        public DocumentModel? AttachmentData { get; set; }
         public List<CourierMetadataItem>? Metadata { get; set; }
     }
 
@@ -66,8 +65,7 @@ namespace HoneyErpAPI.Models
         public string? Email         { get; set; }
         public string? Address       { get; set; }
         public bool?   IsActive      { get; set; }
-        public string? DocId         { get; set; }
-        public string? DocEdid       { get; set; }
+        public DocumentModel? AttachmentData { get; set; }
         public List<CourierMetadataItem>? Metadata { get; set; }
     }
 

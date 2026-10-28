@@ -95,20 +95,20 @@ namespace HoneyErpAPI.Controllers
             return Ok(res);
         }
 
-        [HttpGet("{orderNumber}/tracking")]
-        public IActionResult GetOrderTracking(string orderNumber, [FromQuery] string? orderEdid = null)
+        [HttpGet("{orderEdid}/tracking")]
+        public IActionResult GetOrderTracking(string orderEdid)
         {
             ApiResponseModel<GetOrderStatusTrackingRes> res = new ApiResponseModel<GetOrderStatusTrackingRes>();
             res.Success = true;
-            res.Data    = _service.GetOrderStatusTracking(orderNumber, orderEdid);
+            res.Data    = _service.GetOrderStatusTracking(orderEdid);
             res.Message = "Order status tracking fetched successfully";
             return Ok(res);
         }
 
-        [HttpGet("{orderNumber}/status-history")]
-        public IActionResult GetOrderStatusHistory(string orderNumber, [FromQuery] string? orderEdid = null)
+        [HttpGet("{orderEdid}/status-history")]
+        public IActionResult GetOrderStatusHistory(string orderEdid)
         {
-            return GetOrderTracking(orderNumber, orderEdid);
+            return GetOrderTracking(orderEdid);
         }
 
         [HttpPatch("{edid}/payment-status")]

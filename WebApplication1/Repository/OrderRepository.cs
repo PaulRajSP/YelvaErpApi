@@ -1,5 +1,6 @@
 using HoneyErpAPI.Common;
 using HoneyErpAPI.Models;
+using HoneyErpAPI.Services;
 using Microsoft.Data.SqlClient;
 using System.Data;
 using System.Linq;
@@ -14,7 +15,7 @@ namespace HoneyErpAPI.Repository
         CreateOrderRes Create(CreateOrderReq req, string? createdBy = null);
         bool UpdateStatus(string edid, OrderStatus status);
         bool UpdateStatus(string edid, OrderStatus status, string? remarks = null, string? changedBy = null);
-        GetOrderStatusTrackingRes GetOrderStatusTracking(string orderNumber, string? orderEdid = null);
+        GetOrderStatusTrackingRes GetOrderStatusTracking(string orderEdid);
         bool UpdatePaymentStatus(string edid, OrderStatus paymentStatus);
         GetOrderItemsRes GetItems(string orderEdid);
         GetOrderCommentsRes  GetComments(string orderEdid);
@@ -36,7 +37,14 @@ namespace HoneyErpAPI.Repository
     public class OrderRepository : IOrderRepository
     {
         private readonly DbClient _client;
-        public OrderRepository(DbClient client) => _client = client;
+        private readonly CurrentUserService _currentUserService;
+
+        public OrderRepository(DbClient client, CurrentUserService currentUserService)
+        {
+            _client = client;
+            _currentUserService = currentUserService;
+        }
+
 
         // ── Order ─────────────────────────────────────────────────────────────
 
@@ -207,7 +215,7 @@ namespace HoneyErpAPI.Repository
                   OUTPUT INSERTED.Id VALUES (@OrderNumber,@customerId,@DeliveryType,@DeliveryAddressId,@Subtotal,@DeliveryCharge,@Discount,@TotalAmount,@PaymentStatus,@Status,@CreatedAt,@CreatedBy)";
             int orderId = _client.ExecuteScalar<int>(insertQuery, p, CommandType.Text);
 
-            LogStatusTracking(orderId, OrderStatus.OrderPlaced.ToString(), "Order placed successfully", createdBy ?? "EMP001", DateTime.UtcNow);
+            LogStatusTracking(orderId, OrderStatus.OrderPlaced.ToString(), "Order placed successfully");
 
             if (initialPaid > 0)
             {
@@ -403,7 +411,7 @@ namespace HoneyErpAPI.Repository
                     ? remarks
                     : (status == OrderStatus.Confirmed ? "Order confirmed and physical bottles generated" : 
                        status == OrderStatus.Cancelled ? "Order cancelled by user" : $"Status updated to {status}");
-                LogStatusTracking(orderId, status.ToString(), effectiveRemarks, changedBy ?? "EMP001", DateTime.UtcNow);
+                LogStatusTracking(orderId, status.ToString(), effectiveRemarks);
             }
             return success;
         }
@@ -413,145 +421,95 @@ namespace HoneyErpAPI.Repository
             return UpdateStatus(edid, OrderStatus.Confirmed, "Order confirmed and physical bottles generated", changedBy ?? "EMP001");
         }
 
-        public void LogStatusTracking(int orderId, string status, string? remarks = null, string? changedBy = null, DateTime? changedAt = null)
+        public void LogStatusTracking(int orderId, string status, string? remarks = null)
         {
-            try
-            {
-                SqlParameter[] p = new SqlParameter[5];
-                p[0] = new SqlParameter("@OrderId", orderId);
-                p[1] = new SqlParameter("@Status", status);
-                p[2] = new SqlParameter("@Remarks", Utilities.DbValue(remarks));
-                p[3] = new SqlParameter("@ChangedBy", Utilities.DbValue(changedBy ?? "EMP001"));
-                p[4] = new SqlParameter("@ChangedAt", changedAt ?? DateTime.UtcNow);
+            SqlParameter[] p = new SqlParameter[4];
+            p[0] = new SqlParameter("@OrderId", orderId);
+            p[1] = new SqlParameter("@Status", status);
+            p[2] = new SqlParameter("@Remarks", Utilities.DbValue(remarks));
+            p[3] = new SqlParameter("@ChangedBy", Utilities.DbValue(_currentUserService.EmployeeCode));
 
-                string sql = @"INSERT INTO OrderStatusTracking (orderId, status, remarks, changedBy, changedAt)
-                               VALUES (@OrderId, @Status, @Remarks, @ChangedBy, @ChangedAt)";
-                _client.ExecuteNonQuery(sql, p, CommandType.Text);
-            }
-            catch
-            {
-                // Status tracking failure should not abort main transaction
-            }
+            string sql = @"INSERT INTO OrderStatusTracking (orderId, status, remarks, changedBy)
+                   VALUES (@OrderId, @Status, @Remarks, @ChangedBy)";
+            _client.ExecuteNonQuery(sql, p, CommandType.Text);
         }
 
-        public GetOrderStatusTrackingRes GetOrderStatusTracking(string orderNumber, string? orderEdid = null)
+        public GetOrderStatusTrackingRes GetOrderStatusTracking(string orderEdid)
         {
-            int? resolvedOrderId = null;
-            if (!string.IsNullOrWhiteSpace(orderEdid))
-            {
-                try
-                {
-                    if (int.TryParse(EncryptionHelper.Decrypt(orderEdid), out int idVal))
-                        resolvedOrderId = idVal;
-                    else if (int.TryParse(orderEdid, out int rawVal))
-                        resolvedOrderId = rawVal;
-                }
-                catch { }
-            }
+            SqlParameter[] p = new SqlParameter[1];
+            p[0] = new SqlParameter("@OrderId", EncryptionHelper.Decrypt<int>(orderEdid));
 
-            if (resolvedOrderId == null && !string.IsNullOrWhiteSpace(orderNumber))
-            {
-                if (orderNumber.StartsWith("ORD-", StringComparison.OrdinalIgnoreCase))
-                {
-                    SqlParameter[] np = { new SqlParameter("@OrderNumber", orderNumber.Trim()) };
-                    var idObj = _client.ExecuteScalar<object>("SELECT id FROM OrderMaster WHERE orderNumber = @OrderNumber", np, CommandType.Text);
-                    if (idObj != null && int.TryParse(idObj.ToString(), out int oId))
-                        resolvedOrderId = oId;
-                }
-                else
-                {
-                    try
-                    {
-                        if (int.TryParse(EncryptionHelper.Decrypt(orderNumber), out int decryptedId))
-                            resolvedOrderId = decryptedId;
-                    }
-                    catch { }
+            string sql = @"SELECT o.id AS orderId,
+                          o.orderNumber,
+                          o.status AS currentStatus,
+                          o.createdAt AS orderCreatedAt,
+                          o.createdBy AS orderCreatedBy,
+                          COALESCE(creator.employeeName, o.createdBy) AS creatorName,
+                          ost.id AS trackingId,
+                          CASE 
+                              WHEN ost.id IS NULL THEN 'OrderPlaced'
+                              ELSE ost.status
+                          END AS trackingStatus,
+                          CASE 
+                              WHEN ost.id IS NULL THEN 'Order placed successfully'
+                              ELSE ost.remarks
+                          END AS remarks,
+                          CASE 
+                              WHEN ost.id IS NULL THEN o.createdBy
+                              ELSE ost.changedBy
+                          END AS changedBy,
+                          CASE 
+                              WHEN ost.id IS NULL THEN COALESCE(creator.employeeName, o.createdBy)
+                              ELSE COALESCE(changer.employeeName, ost.changedBy)
+                          END AS employeeName,
+                          COALESCE(ost.changedAt, o.createdAt) AS changedAt
+                   FROM OrderMaster o
+                   LEFT JOIN EmployeeMaster creatorMaster 
+                       ON creatorMaster.employeeCode = o.createdBy
+                   LEFT JOIN EmployeeAdditionalDetails creator 
+                       ON creator.employeeMstId = creatorMaster.employeeId
+                   LEFT JOIN OrderStatusTracking ost 
+                       ON ost.orderId = o.id
+                   LEFT JOIN EmployeeMaster changerMaster 
+                       ON changerMaster.employeeCode = ost.changedBy
+                   LEFT JOIN EmployeeAdditionalDetails changer 
+                       ON changer.employeeMstId = changerMaster.employeeId
+                   WHERE o.id = @OrderId
+                   ORDER BY ost.changedAt ASC, ost.id ASC";
 
-                    if (resolvedOrderId == null)
-                    {
-                        SqlParameter[] np = { new SqlParameter("@OrderNumber", orderNumber.Trim()) };
-                        var idObj = _client.ExecuteScalar<object>("SELECT id FROM OrderMaster WHERE orderNumber = @OrderNumber", np, CommandType.Text);
-                        if (idObj != null && int.TryParse(idObj.ToString(), out int oId))
-                            resolvedOrderId = oId;
-                    }
-                }
-            }
+            DataTable dt = _client.ExecuteAdapter(sql, p, CommandType.Text).Tables[0];
 
-            if (resolvedOrderId == null)
-            {
-                throw new HoneyErpException(ErrorCode.NotFound, "Order not found");
-            }
-
-            SqlParameter[] op = { new SqlParameter("@OrderId", resolvedOrderId.Value) };
-            string orderInfoSql = @"SELECT o.orderNumber, o.status, o.createdAt, o.createdBy,
-                                           COALESCE(ead.employeeName, o.createdBy) AS creatorName
-                                    FROM OrderMaster o
-                                    LEFT JOIN EmployeeMaster em ON em.employeeCode = o.createdBy
-                                    LEFT JOIN EmployeeAdditionalDetails ead ON ead.employeeMstId = em.employeeId
-                                    WHERE o.id = @OrderId";
-            DataTable oDt = _client.ExecuteAdapter(orderInfoSql, op, CommandType.Text).Tables[0];
-            if (oDt.Rows.Count == 0)
+            if (dt.Rows.Count == 0)
             {
                 throw new HoneyErpException(ErrorCode.NotFound, "Order not found");
             }
 
-            string actualOrderNumber = oDt.Rows[0].Field<string>("orderNumber") ?? orderNumber;
-            string currentStatus = oDt.Rows[0].Field<string>("status") ?? string.Empty;
-            DateTime orderCreatedAt = oDt.Rows[0].Field<DateTime>("createdAt");
-            string orderCreatedBy = oDt.Rows[0].Field<string?>("createdBy") ?? "EMP001";
-            string orderCreatorName = oDt.Rows[0].Field<string?>("creatorName") ?? orderCreatedBy;
+            DataRow firstRow = dt.Rows[0];
 
             GetOrderStatusTrackingRes res = new GetOrderStatusTrackingRes
             {
-                OrderEdid = EncryptionHelper.Encrypt(resolvedOrderId.Value.ToString()),
-                OrderNumber = actualOrderNumber,
-                CurrentStatus = currentStatus,
+                OrderEdid = EncryptionHelper.Encrypt(firstRow.Field<int>("orderId").ToString()),
+                OrderNumber = firstRow.Field<string>("orderNumber") ?? string.Empty,
+                CurrentStatus = firstRow.Field<string>("currentStatus") ?? string.Empty,
                 Items = new List<OrderStatusTrackingDto>()
             };
 
-            SqlParameter[] tp = { new SqlParameter("@OrderId", resolvedOrderId.Value) };
-            string trackingSql = @"SELECT ost.id, ost.status, ost.remarks, 
-                                          ost.changedBy AS employeeCode,
-                                          COALESCE(ead.employeeName, ost.changedBy) AS employeeName, 
-                                          ost.changedAt 
-                                   FROM OrderStatusTracking ost
-                                   LEFT JOIN EmployeeMaster em ON em.employeeCode = ost.changedBy
-                                   LEFT JOIN EmployeeAdditionalDetails ead ON ead.employeeMstId = em.employeeId
-                                   WHERE ost.orderId = @OrderId 
-                                   ORDER BY ost.changedAt ASC, ost.id ASC";
-            DataTable tDt = _client.ExecuteAdapter(trackingSql, tp, CommandType.Text).Tables[0];
-
-            if (tDt.Rows.Count == 0)
+            foreach (DataRow row in dt.Rows)
             {
                 res.Items.Add(new OrderStatusTrackingDto
                 {
-                    Edid = EncryptionHelper.Encrypt(resolvedOrderId.Value.ToString()),
-                    Status = OrderStatus.OrderPlaced.ToString(),
-                    Remarks = "Order placed successfully",
-                    ChangedBy = orderCreatedBy,
-                    EmployeeName = orderCreatorName,
-                    ChangedAt = orderCreatedAt
+                    Edid = EncryptionHelper.Encrypt(row.Field<int>("trackingId").ToString()),
+                    Status = row.Field<string>("trackingStatus") ?? string.Empty,
+                    Remarks = row.Field<string?>("remarks"),
+                    ChangedBy = row.Field<string?>("changedBy"),
+                    EmployeeName = row.Field<string?>("employeeName"),
+                    ChangedAt = row.Field<DateTime>("changedAt")
                 });
-            }
-            else
-            {
-                foreach (DataRow row in tDt.Rows)
-                {
-                    res.Items.Add(new OrderStatusTrackingDto
-                    {
-                        Edid = EncryptionHelper.Encrypt(row.Field<int>("id").ToString()),
-                        Status = row.Field<string>("status") ?? string.Empty,
-                        Remarks = row.Field<string?>("remarks"),
-                        ChangedBy = row.Field<string?>("employeeCode"),
-                        EmployeeName = row.Field<string?>("employeeName"),
-                        ChangedAt = row.Field<DateTime>("changedAt")
-                    });
-                }
             }
 
             return res;
         }
-
+        
         private void CreatePhysicalBottlesIfNotExist(int orderId)
         {
             SqlParameter[] syncP = { new SqlParameter("@OrderId", orderId) };
@@ -776,10 +734,8 @@ namespace HoneyErpAPI.Repository
 
         public SavePackageRes SavePackage(string orderEdid, SavePackageReq req)
         {
-            string orderId = EncryptionHelper.Decrypt(orderEdid);
-
             SqlParameter[] p = new SqlParameter[6];
-            p[0] = new SqlParameter("@OrderId", orderId);
+            p[0] = new SqlParameter("@OrderId", EncryptionHelper.Decrypt(orderEdid));
             p[1] = new SqlParameter("@Length",  Utilities.DbValue(req.Length));
             p[2] = new SqlParameter("@Width",   Utilities.DbValue(req.Width));
             p[3] = new SqlParameter("@Height",  Utilities.DbValue(req.Height));
@@ -1370,7 +1326,7 @@ namespace HoneyErpAPI.Repository
                 SqlParameter[] p = new SqlParameter[5];
                 p[0] = new SqlParameter("@Id", opiId);
                 p[1] = new SqlParameter("@ProductBatchId", batchId);
-                p[2] = new SqlParameter("@PackedBy", "testing");
+                p[2] = new SqlParameter("@PackedBy", _currentUserService.EmployeeCode);
                 p[3] = new SqlParameter("@PackedAt", DateTime.UtcNow);
                 p[4] = new SqlParameter("@Status", OrderProductItemStatus.Packed.ToString());
 
@@ -1494,7 +1450,7 @@ namespace HoneyErpAPI.Repository
             bool packed = _client.ExecuteNonQuery("UPDATE OrderMaster SET status=@Status WHERE id=@Id", statusP, CommandType.Text) > 0;
             if (packed)
             {
-                LogStatusTracking(orderId, OrderStatus.ReadyToShip.ToString(), $"Order packed ({req.BottleAssignments?.Count ?? 0} bottles, weight: {req.Weight ?? 0}kg)", !string.IsNullOrWhiteSpace(req.PackedBy) ? req.PackedBy : "EMP001", DateTime.UtcNow);
+                LogStatusTracking(orderId, OrderStatus.ReadyToShip.ToString(), $"Order packed ({req.BottleAssignments?.Count ?? 0} bottles, weight: {req.Weight ?? 0}kg)");
             }
             return packed;
         }
@@ -1619,7 +1575,7 @@ namespace HoneyErpAPI.Repository
             {
                 string courierName = !string.IsNullOrWhiteSpace(req.Courier) ? req.Courier : "Courier";
                 string trackStr = !string.IsNullOrWhiteSpace(trackingNumber) ? $" Tracking: {trackingNumber}" : "";
-                LogStatusTracking(orderId, OrderStatus.Shipped.ToString(), $"Dispatched via {courierName}.{trackStr}", handedOverBy, handedOverAt);
+                LogStatusTracking(orderId, OrderStatus.Shipped.ToString(), $"Dispatched via {courierName}.{trackStr}");
 
                 // 9. Record courier/delivery charge into financial ledger (PaymentTransactionMaster)
                 if (req.CourierCharge.HasValue && req.CourierCharge.Value > 0)
