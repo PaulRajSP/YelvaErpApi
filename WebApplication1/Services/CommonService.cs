@@ -38,7 +38,7 @@ namespace HoneyErpAPI.Services
             return _repo.GetEnumValues(typeName);
         }
 
-        public async Task<AddAttachmentRes> SaveAttachment(IFormFile file)
+        public async Task<DocumentModel> SaveAttachment(IFormFile file)
         {
             if (file == null || file.Length == 0)
             {
@@ -84,12 +84,14 @@ namespace HoneyErpAPI.Services
 
             int attachmentId = _repo.InsertAttachment(model);
 
-            return new AddAttachmentRes
+            string edid = EncryptionHelper.Encrypt(attachmentId.ToString());
+            return new DocumentModel
             {
-                Edid = EncryptionHelper.Encrypt(attachmentId.ToString())
+                DocumentEdid = edid,
+                DocumentOriginalName = originalName
             };
         }
-        public AttachmentModel GetAttachment(string edid,string fileName)
+        public AttachmentModel GetAttachment(string edid, string? fileName = null)
         {
             var model = _repo.GetAttachment(edid, fileName);
             if (model == null || string.IsNullOrEmpty(model.FilePath))

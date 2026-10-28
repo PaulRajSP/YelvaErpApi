@@ -41,7 +41,7 @@ namespace HoneyErpAPI.Controllers
         [HttpPost("upload")]
         public async Task<IActionResult> Upload(IFormFile? file)
         {
-            ApiResponseModel<AddAttachmentRes> res = new ApiResponseModel<AddAttachmentRes>();
+            ApiResponseModel<DocumentModel> res = new ApiResponseModel<DocumentModel>();
             res.Success = true;
             res.Data= await _service.SaveAttachment(file);
 
@@ -49,7 +49,7 @@ namespace HoneyErpAPI.Controllers
         }
 
         [HttpGet("attachment/{edid}/{fileName}")]
-        public async Task<IActionResult> GetAttachment(string edid,string fileName)
+        public async Task<IActionResult> GetAttachment(string edid, string fileName)
         {
             if (string.IsNullOrWhiteSpace(edid))
                 return BadRequest("Attachment identifier is required.");

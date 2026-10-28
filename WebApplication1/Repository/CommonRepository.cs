@@ -11,7 +11,7 @@ namespace HoneyErpAPI.Repository
     {
         EnumListResponse GetEnumValues(string typeName);
         int InsertAttachment(AttachmentModel model);
-        AttachmentModel? GetAttachment(string edid,string fileName);
+        AttachmentModel? GetAttachment(string edid, string? fileName = null);
        
     }
 
@@ -93,14 +93,18 @@ namespace HoneyErpAPI.Repository
             return _client.ExecuteScalar<int>(query, p, System.Data.CommandType.Text);
         }
 
-        public AttachmentModel? GetAttachment(string edid, string fileName)
+        public AttachmentModel? GetAttachment(string edid, string? fileName = null)
         {
+            int attachmentId;
+            if (!int.TryParse(edid, out attachmentId))
+            {
+                attachmentId = EncryptionHelper.Decrypt<int>(edid);
+            }
 
-            Microsoft.Data.SqlClient.SqlParameter[] p = new Microsoft.Data.SqlClient.SqlParameter[2];
-            p[0] = new Microsoft.Data.SqlClient.SqlParameter("@Id", EncryptionHelper.Decrypt<int>(edid));
-            p[1] = new Microsoft.Data.SqlClient.SqlParameter("@FileName", fileName);
+            Microsoft.Data.SqlClient.SqlParameter[] p = new Microsoft.Data.SqlClient.SqlParameter[1];
+            p[0] = new Microsoft.Data.SqlClient.SqlParameter("@Id", attachmentId);
 
-            string query = "SELECT originalName, storedName, filePath FROM AttachmentMaster WHERE id=@Id AND originalName=@FileName";
+            string query = "SELECT originalName, storedName, filePath FROM AttachmentMaster WHERE id=@Id";
             System.Data.DataTable dt = _client.ExecuteAdapter(query, p, System.Data.CommandType.Text).Tables[0];
 
             if (dt.Rows.Count > 0)

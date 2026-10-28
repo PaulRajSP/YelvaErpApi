@@ -48,9 +48,9 @@ namespace HoneyErpAPI.Services
                 throw new HoneyErpException(ErrorCode.NotFound, "Order not found.");
         }
 
-        public GetOrderStatusTrackingRes GetOrderStatusTracking(string orderNumber, string? orderEdid = null)
+        public GetOrderStatusTrackingRes GetOrderStatusTracking(string orderEdid)
         {
-            return _repo.GetOrderStatusTracking(orderNumber, orderEdid);
+            return _repo.GetOrderStatusTracking(orderEdid);
         }
 
         public void UpdatePaymentStatus(string edid, OrderStatus paymentStatus)

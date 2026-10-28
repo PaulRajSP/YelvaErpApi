@@ -54,8 +54,7 @@ namespace HoneyErpAPI.Models
         public decimal PaidAmount { get; set; }
         public decimal Balance { get; set; }
         public string Status { get; set; } = string.Empty;
-        public int? DocId { get; set; }
-        public string? DocEdid { get; set; }
+        public DocumentModel? AttachmentData { get; set; }
     }
 
     // ── Get Purchase by Id ────────────────────────────────────────────────────
@@ -70,8 +69,7 @@ namespace HoneyErpAPI.Models
         public decimal PaidAmount { get; set; }
         public decimal Balance { get; set; }
         public string Status { get; set; } = string.Empty;
-        public int? DocId { get; set; }
-        public string? DocEdid { get; set; }
+        public DocumentModel? AttachmentData { get; set; }
     }
 
     // ── Create Purchase ───────────────────────────────────────────────────────
@@ -87,8 +85,7 @@ namespace HoneyErpAPI.Models
         public DateTime Date { get; set; }
         public decimal TotalAmount { get; set; }
         public decimal PaidAmount { get; set; }
-        public int? DocId { get; set; }
-        public string? DocEdid { get; set; }
+        public DocumentModel? AttachmentData { get; set; }
         [JsonIgnore]
         public PurchaseStatus Status { get; set; } = PurchaseStatus.Unpaid;
         [JsonIgnore]
