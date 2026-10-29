@@ -74,8 +74,8 @@ namespace HoneyErpAPI.Repository
                                  FROM OrderPayment op
                                  WHERE op.orderId = o.id
                              ) p
-                             WHERE (@FromDate IS NULL OR CAST(o.createdAt AS DATE) >= CAST(@FromDate AS DATE))
-                               AND (@ToDate IS NULL OR CAST(o.createdAt AS DATE) <= CAST(@ToDate AS DATE))
+                             WHERE (@FromDate IS NULL OR o.createdAt >= @FromDate)
+                                    AND (@ToDate IS NULL OR o.createdAt <= @ToDate)
                                AND (@Status IS NULL OR o.status = @Status)
                                AND (@PaymentStatus IS NULL OR o.paymentStatus = @PaymentStatus OR
                                     (@PaymentStatus = 'UNPAID' AND (o.paymentStatus = 'UNPAID' OR o.paymentStatus = 'Unpaid' OR ISNULL(p.amountPaid, 0) <= 0)) OR
@@ -191,6 +191,7 @@ namespace HoneyErpAPI.Repository
             string orderNumber = Utilities.GeneratePublicId("ORD",5);
 
             decimal initialPaid = req.Order.InitialPaymentAmount ?? 0m;
+            int? initialPaymentId = null;
             PaymentStatus initialPaymentStatus = PaymentStatus.Unpaid;
             if (initialPaid > 0)
             {
@@ -224,17 +225,7 @@ namespace HoneyErpAPI.Repository
                 string payType = !string.IsNullOrWhiteSpace(req.Order.InitialPaymentType) ? req.Order.InitialPaymentType : (initialPaid >= req.Order.TotalAmount ? OrderPaymentType.FullPayment.ToString() : OrderPaymentType.Advance.ToString());
                 string payStatus = OrderPaymentStatus.Success.ToString();
 
-                int? initialDocId = req.Order.InitialPaymentDocId;
-                if (!initialDocId.HasValue && !string.IsNullOrWhiteSpace(req.Order.InitialPaymentDocEdid))
-                {
-                    string decrypted = EncryptionHelper.Decrypt(req.Order.InitialPaymentDocEdid);
-                    if (int.TryParse(decrypted, out int parsedId))
-                        initialDocId = parsedId;
-                    else if (int.TryParse(req.Order.InitialPaymentDocEdid, out int rawId))
-                        initialDocId = rawId;
-                }
-
-                SqlParameter[] payP = new SqlParameter[10];
+                SqlParameter[] payP = new SqlParameter[9];
                 payP[0] = new SqlParameter("@OrderId", orderId);
                 payP[1] = new SqlParameter("@TransactionNumber", txnNumber);
                 payP[2] = new SqlParameter("@PaymentMethod", payMethod);
@@ -244,11 +235,11 @@ namespace HoneyErpAPI.Repository
                 payP[6] = new SqlParameter("@PaymentReference", Utilities.DbValue(req.Order.InitialPaymentReference));
                 payP[7] = new SqlParameter("@PaymentDate", DateTime.UtcNow);
                 payP[8] = new SqlParameter("@Remark", "Initial payment on order creation");
-                payP[9] = new SqlParameter("@DocId", (object?)initialDocId ?? DBNull.Value);
 
-                string payQuery = @"INSERT INTO OrderPayment (orderId, transactionNumber, paymentMethod, paymentType, amount, status, paymentReference, paymentDate, remark, docId, createdAt)
-                                    VALUES (@OrderId, @TransactionNumber, @PaymentMethod, @PaymentType, @Amount, @Status, @PaymentReference, @PaymentDate, @Remark, @DocId, SYSUTCDATETIME())";
-                _client.ExecuteNonQuery(payQuery, payP, CommandType.Text);
+                string payQuery = @"INSERT INTO OrderPayment (orderId, transactionNumber, paymentMethod, paymentType, amount, status, paymentReference, paymentDate, remark, createdAt)
+                                    OUTPUT INSERTED.Id
+                                    VALUES (@OrderId, @TransactionNumber, @PaymentMethod, @PaymentType, @Amount, @Status, @PaymentReference, @PaymentDate, @Remark, SYSUTCDATETIME())";
+                initialPaymentId = _client.ExecuteScalar<int>(payQuery, payP, CommandType.Text);
 
                 // Entry in TransactionMaster & PaymentTransactionMaster
                 string txnDesc = $"Order #{orderNumber} payment via {payMethod}";
@@ -310,6 +301,7 @@ namespace HoneyErpAPI.Repository
             CreateOrderRes resp = new CreateOrderRes();
             resp.Edid = EncryptionHelper.Encrypt(orderId.ToString());
             resp.OrderNumber = orderNumber;
+            resp.InitialPaymentEdid = initialPaymentId.HasValue ? EncryptionHelper.Encrypt(initialPaymentId.Value.ToString()) : null;
             return resp;
         }
 
@@ -698,7 +690,7 @@ namespace HoneyErpAPI.Repository
 
             string query = @"
                 SELECT op.id, op.length, op.width, op.height, op.weight, op.status,
-                       cm.name AS courier, ch.courierId, ch.trackingNumber AS tracking, ch.receiptDocId, ch.totalWeight AS handoverWeight,
+                      cm.name AS courier, ch.courierId, ch.trackingNumber AS tracking, ch.totalWeight AS handoverWeight,
                        ch.handedOverBy, ch.handedOverAt
                 FROM OrderPackage op
                 LEFT JOIN CourierHandover ch ON op.orderId = ch.orderMasterId
@@ -709,12 +701,6 @@ namespace HoneyErpAPI.Repository
             if (dt.Rows.Count == 0) return null;
 
             DataRow row = dt.Rows[0];
-            string? slipDoc = null;
-            if (dt.Columns.Contains("receiptDocId") && !row.IsNull("receiptDocId"))
-            {
-                slipDoc = EncryptionHelper.Encrypt(Convert.ToString(row["receiptDocId"]));
-            }
-
             return new GetPackageRes
             {
                 Edid              = EncryptionHelper.Encrypt(row.Field<int>("id").ToString()),
@@ -726,7 +712,6 @@ namespace HoneyErpAPI.Repository
                 CourierId         = row.IsNull("courierId") ? (int?)null : Convert.ToInt32(row["courierId"]),
                 Status            = Enum.TryParse<PackageStatus>(row.Field<string?>("status"), true, out var pkgSt) ? pkgSt : null,
                 Tracking          = row.Field<string?>("tracking"),
-                SlipDocument      = slipDoc,
                 HandedOverBy      = row.Field<string?>("handedOverBy"),
                 HandedOverAt      = row.IsNull("handedOverAt") ? (DateTime?)null : Convert.ToDateTime(row["handedOverAt"])
             };
@@ -869,7 +854,6 @@ namespace HoneyErpAPI.Repository
             cm.name AS courier,
             ch.courierId,
             ch.trackingNumber AS tracking,
-            ch.receiptDocId,
             ch.totalWeight AS handoverWeight,
             ch.handedOverBy,
             ch.handedOverAt,
@@ -960,10 +944,6 @@ namespace HoneyErpAPI.Repository
             // Package Details
             if (!row.IsNull("packageId") || !row.IsNull("courierId") || !row.IsNull("tracking"))
             {
-                string? slipDoc = null;
-                if (dt.Columns.Contains("receiptDocId") && !row.IsNull("receiptDocId"))
-                    slipDoc = EncryptionHelper.Encrypt(Convert.ToString(row["receiptDocId"]));
-
                 res.Package = new OrderPackageDetail
                 {
                     Edid = row.IsNull("packageId") ? null : EncryptionHelper.Encrypt(Convert.ToString(row["packageId"])),
@@ -975,7 +955,6 @@ namespace HoneyErpAPI.Repository
                     CourierId = row.IsNull("courierId") ? (int?)null : Convert.ToInt32(row["courierId"]),
                     Status = Enum.TryParse<PackageStatus>(row.Field<string?>("packageStatus"), true, out var pkgSt) ? pkgSt : null,
                     Tracking = row.Field<string?>("tracking"),
-                    SlipDocument = slipDoc,
                     HandedOverBy = row.Field<string?>("handedOverBy"),
                     HandedOverAt = row.IsNull("handedOverAt") ? (DateTime?)null : Convert.ToDateTime(row["handedOverAt"])
                 };
@@ -1087,7 +1066,7 @@ namespace HoneyErpAPI.Repository
             try
             {
                 SqlParameter[] paymentParam = { new SqlParameter("@OrderId", resolvedOrderId) };
-                string paymentQuery = @"SELECT id, orderId, transactionNumber, paymentMethod, paymentType, amount, status, paymentReference, paymentDate, remark, docId, createdAt
+                string paymentQuery = @"SELECT id, orderId, transactionNumber, paymentMethod, paymentType, amount, status, paymentReference, paymentDate, remark, createdAt
                                        FROM OrderPayment WHERE orderId = @OrderId ORDER BY createdAt DESC";
                 DataTable paymentDt = _client.ExecuteAdapter(paymentQuery, paymentParam, CommandType.Text).Tables[0];
                 decimal totalPaid = 0m;
@@ -1103,9 +1082,6 @@ namespace HoneyErpAPI.Repository
                     else if (pStatusEnum == OrderPaymentStatus.Refunded)
                         totalPaid -= pAmount;
 
-                    int? docId = pRow.IsNull("docId") ? (int?)null : Convert.ToInt32(pRow["docId"]);
-                    string? docEdid = docId.HasValue ? EncryptionHelper.Encrypt(docId.Value.ToString()) : null;
-
                     res.Payments.Add(new OrderPaymentItem
                     {
                         Edid = EncryptionHelper.Encrypt(pRow.Field<int>("id").ToString()),
@@ -1119,8 +1095,6 @@ namespace HoneyErpAPI.Repository
                         PaymentReference = pRow.Field<string?>("paymentReference"),
                         PaymentDate = pRow.Field<DateTime?>("paymentDate"),
                         Remark = pRow.Field<string?>("remark"),
-                        DocId = docId,
-                        DocEdid = docEdid,
                         CreatedAt = pRow.Field<DateTime>("createdAt")
                     });
                 }
@@ -1494,24 +1468,6 @@ namespace HoneyErpAPI.Repository
                 courierId = firstCid != null && int.TryParse(firstCid.ToString(), out int fc) ? fc : 1;
             }
 
-            // 2. Resolve ReceiptDocId from SlipDocument
-            int? receiptDocId = req.ReceiptDocId;
-            if (!receiptDocId.HasValue && !string.IsNullOrWhiteSpace(req.SlipDocument))
-            {
-                try
-                {
-                    string decrypted = EncryptionHelper.Decrypt(req.SlipDocument);
-                    if (int.TryParse(decrypted, out int docId))
-                    {
-                        receiptDocId = docId;
-                    }
-                }
-                catch
-                {
-                    receiptDocId = null;
-                }
-            }
-
             // 3. Resolve TrackingNumber
             string trackingNumber = (req.TrackingNumber ?? req.Tracking ?? string.Empty).Trim();
 
@@ -1532,21 +1488,19 @@ namespace HoneyErpAPI.Repository
             DateTime handedOverAt = req.HandedOverAt ?? DateTime.UtcNow;
 
             // 6. Upsert into CourierHandover
-            SqlParameter[] chP = new SqlParameter[7];
+            SqlParameter[] chP = new SqlParameter[6];
             chP[0] = new SqlParameter("@OrderId",        orderId);
             chP[1] = new SqlParameter("@CourierId",      courierId);
-            chP[2] = new SqlParameter("@ReceiptDocId",   Utilities.DbValue(receiptDocId));
-            chP[3] = new SqlParameter("@TrackingNumber", Utilities.DbValue(trackingNumber));
-            chP[4] = new SqlParameter("@TotalWeight",    Utilities.DbValue(totalWeight));
-            chP[5] = new SqlParameter("@HandedOverBy",   Utilities.DbValue(handedOverBy));
-            chP[6] = new SqlParameter("@HandedOverAt",   Utilities.DbValue(handedOverAt));
+            chP[2] = new SqlParameter("@TrackingNumber", Utilities.DbValue(trackingNumber));
+            chP[3] = new SqlParameter("@TotalWeight",    Utilities.DbValue(totalWeight));
+            chP[4] = new SqlParameter("@HandedOverBy",   Utilities.DbValue(handedOverBy));
+            chP[5] = new SqlParameter("@HandedOverAt",   Utilities.DbValue(handedOverAt));
 
             string upsertHandover = @"
                 IF EXISTS (SELECT 1 FROM CourierHandover WHERE orderMasterId = @OrderId)
                 BEGIN
                     UPDATE CourierHandover 
                     SET courierId = @CourierId,
-                        receiptDocId = @ReceiptDocId,
                         trackingNumber = @TrackingNumber,
                         totalWeight = @TotalWeight,
                         handedOverBy = @HandedOverBy,
@@ -1555,8 +1509,8 @@ namespace HoneyErpAPI.Repository
                 END
                 ELSE
                 BEGIN
-                    INSERT INTO CourierHandover (orderMasterId, courierId, receiptDocId, trackingNumber, totalWeight, handedOverBy, handedOverAt)
-                    VALUES (@OrderId, @CourierId, @ReceiptDocId, @TrackingNumber, @TotalWeight, @HandedOverBy, @HandedOverAt);
+                    INSERT INTO CourierHandover (orderMasterId, courierId, trackingNumber, totalWeight, handedOverBy, handedOverAt)
+                    VALUES (@OrderId, @CourierId, @TrackingNumber, @TotalWeight, @HandedOverBy, @HandedOverAt);
                 END";
             _client.ExecuteNonQuery(upsertHandover, chP, CommandType.Text);
 

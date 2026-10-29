@@ -1,6 +1,7 @@
 using HoneyErpAPI.Common;
 using HoneyErpAPI.Models;
 using HoneyErpAPI.Repository;
+using AttachmentEnum;
 using static WebApplication1.Common.Models;
 
 namespace HoneyErpAPI.Services
@@ -9,11 +10,13 @@ namespace HoneyErpAPI.Services
     {
         private readonly IOrderRepository _repo;
         private readonly ICurrentUserService _currentUserService;
+        private readonly CommonService _commonService;
 
-        public OrderService(IOrderRepository repo, ICurrentUserService currentUserService)
+        public OrderService(IOrderRepository repo, ICurrentUserService currentUserService, CommonService commonService)
         {
             _repo = repo;
             _currentUserService = currentUserService;
+            _commonService = commonService;
         }
 
         public PageResult<OrderListItem> GetAll(GetOrderListReq req) => _repo.GetAll(req);
@@ -33,7 +36,10 @@ namespace HoneyErpAPI.Services
                 throw new HoneyErpException(ErrorCode.InvalidData, "Order must have at least one item.");
 
             string createdBy = _currentUserService.EmployeeCode ?? "EMP001";
-            return _repo.Create(req, createdBy);
+            CreateOrderRes result = _repo.Create(req, createdBy);
+            if (req.Order.InitialPaymentAttachmentData != null && !string.IsNullOrWhiteSpace(result.InitialPaymentEdid))
+                _commonService.SetModuleAttachments(MapPaymentAttachments(req.Order.InitialPaymentAttachmentData), AttachmentModule.OrderPayment, result.InitialPaymentEdid);
+            return result;
         }
 
         public void UpdateStatus(string edid, OrderStatus status)
@@ -72,7 +78,9 @@ namespace HoneyErpAPI.Services
         public GetPackageRes GetPackage(string orderEdid)
         {
             GetPackageRes? pkg = _repo.GetPackage(orderEdid);
-            return pkg ?? new GetPackageRes();
+            if (pkg == null) return new GetPackageRes();
+            LoadPackageAttachments(pkg, orderEdid);
+            return pkg;
         }
 
         public SavePackageRes SavePackage(string orderEdid, SavePackageReq req)
@@ -105,6 +113,11 @@ namespace HoneyErpAPI.Services
             if (order == null)
                 throw new HoneyErpException(ErrorCode.NotFound, "Order not found.");
 
+            foreach (OrderPaymentItem payment in order.Payments)
+                payment.AttachmentData = _commonService.GetModuleAttachments(AttachmentModule.OrderPayment, payment.Edid);
+            if (order.Package != null)
+                LoadPackageAttachments(order.Package, order.Edid);
+
             return order;
         }
 
@@ -128,7 +141,40 @@ namespace HoneyErpAPI.Services
             if (res == null)
                 throw new HoneyErpException(ErrorCode.NotFound, "Order not found.");
 
+            if (res.Package != null)
+                LoadPackageAttachments(res.Package, res.OrderEdid);
+
             return res;
+        }
+
+        private void LoadPackageAttachments(GetPackageRes package, string orderEdid)
+        {
+            package.AttachmentData = _commonService.GetModuleAttachments(AttachmentModule.OrderHandover, orderEdid);
+        }
+
+        private void LoadPackageAttachments(OrderPackageDetail package, string orderEdid)
+        {
+            package.AttachmentData = _commonService.GetModuleAttachments(AttachmentModule.OrderHandover, orderEdid);
+        }
+
+        private static List<DocumentAttachmentReq> MapPaymentAttachments(List<OrderPaymentAttachmentReq> attachments)
+        {
+            return attachments.Select(item => new DocumentAttachmentReq
+            {
+                AttachmentEdid = item.AttachmentEdid,
+                AttachmentType = item.AttachmentType.ToString(),
+                Remarks = item.Remarks
+            }).ToList();
+        }
+
+        private static List<DocumentAttachmentReq> MapHandoverAttachments(List<OrderHandoverAttachmentReq> attachments)
+        {
+            return attachments.Select(item => new DocumentAttachmentReq
+            {
+                AttachmentEdid = item.AttachmentEdid,
+                AttachmentType = item.AttachmentType.ToString(),
+                Remarks = item.Remarks
+            }).ToList();
         }
 
         public GetOrderBottlesRes GetOrderBottles(string orderNumber)
@@ -187,6 +233,9 @@ namespace HoneyErpAPI.Services
 
             if (!_repo.DispatchOrder(req))
                 throw new HoneyErpException(ErrorCode.InternalError, "Failed to dispatch order.");
+
+            if (req.AttachmentData != null)
+                _commonService.SetModuleAttachments(MapHandoverAttachments(req.AttachmentData), AttachmentModule.OrderHandover, req.OrderEdid);
         }
 
         public PageResult<OrderListItem> GetReadyToShipOrders(GetOrderListReq req)

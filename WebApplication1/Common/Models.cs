@@ -50,5 +50,11 @@ namespace WebApplication1.Common
             public decimal QuantityUsed { get; set; }
             public string ProductEdid { get; set; } = string.Empty;
         }
+
+        public class ListResult<T> : BaseApiResponse
+        {
+            public List<T> Items { get; set; } = new List<T>();
+        }
+
     }
 }

@@ -54,7 +54,7 @@ namespace HoneyErpAPI.Models
         public decimal PaidAmount { get; set; }
         public decimal Balance { get; set; }
         public string Status { get; set; } = string.Empty;
-        public DocumentModel? AttachmentData { get; set; }
+        public List<AttachmentModuleRes> AttachmentData { get; set; } = new();
     }
 
     // ── Get Purchase by Id ────────────────────────────────────────────────────
@@ -69,7 +69,22 @@ namespace HoneyErpAPI.Models
         public decimal PaidAmount { get; set; }
         public decimal Balance { get; set; }
         public string Status { get; set; } = string.Empty;
-        public DocumentModel? AttachmentData { get; set; }
+        public List<AttachmentModuleRes> AttachmentData { get; set; } = new();
+        public List<PurchasePaymentItem> Payments { get; set; } = new();
+    }
+
+    public class PurchasePaymentItem
+    {
+        public string Edid { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public string TransactionNumber { get; set; } = string.Empty;
+        public string PaymentMethod { get; set; } = string.Empty;
+        public OrderPaymentType PaymentType { get; set; } = OrderPaymentType.Advance;
+        public OrderPaymentStatus Status { get; set; } = OrderPaymentStatus.Success;
+        public string? PaymentReference { get; set; }
+        public string? Remarks { get; set; }
+        public DateTime PaymentDate { get; set; }
+        public List<AttachmentModuleRes> AttachmentData { get; set; } = new();
     }
 
     // ── Create Purchase ───────────────────────────────────────────────────────
@@ -85,7 +100,12 @@ namespace HoneyErpAPI.Models
         public DateTime Date { get; set; }
         public decimal TotalAmount { get; set; }
         public decimal PaidAmount { get; set; }
-        public DocumentModel? AttachmentData { get; set; }
+        public string? InitialPaymentMethod { get; set; }
+        public OrderPaymentType InitialPaymentType { get; set; } = OrderPaymentType.Advance;
+        public string? InitialPaymentReference { get; set; }
+        public string? InitialPaymentRemark { get; set; }
+        public List<DocumentAttachmentReq>? InitialPaymentAttachmentData { get; set; }
+        public List<DocumentAttachmentReq>? AttachmentData { get; set; }
         [JsonIgnore]
         public PurchaseStatus Status { get; set; } = PurchaseStatus.Unpaid;
         [JsonIgnore]
@@ -106,6 +126,8 @@ namespace HoneyErpAPI.Models
     public class CreatePurchaseRes : BaseApiResponse
     {
         public string Edid { get; set; } = string.Empty;
+        public string? InitialPaymentEdid { get; set; }
+        public string? InitialPaymentTransactionNumber { get; set; }
     }
 
     // ── Purchase Items ────────────────────────────────────────────────────────
@@ -142,11 +164,21 @@ namespace HoneyErpAPI.Models
     {
         public string PurchaseEdid { get; set; } = string.Empty;
         public decimal Amount { get; set; }
+        public OrderPaymentMethod PaymentMethod { get; set; } = OrderPaymentMethod.Cash;
+        public OrderPaymentType PaymentType { get; set; } = OrderPaymentType.Advance;
+        public OrderPaymentStatus Status { get; set; } = OrderPaymentStatus.Success;
+        public string? PaymentReference { get; set; }
+        public string? Remarks { get; set; }
+        public DateTime? PaymentDate { get; set; }
+        public List<DocumentAttachmentReq>? AttachmentData { get; set; }
     }
 
     public class PayPurchaseDueRes : BaseApiResponse
     {
         public string PurchaseEdid { get; set; } = string.Empty;
+        public string PaymentEdid { get; set; } = string.Empty;
+        public string TransactionNumber { get; set; } = string.Empty;
+        public List<AttachmentModuleRes> AttachmentData { get; set; } = new();
     }
 
     // ── No-data response (for status updates) ────────────────────────────────

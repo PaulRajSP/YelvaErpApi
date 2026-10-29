@@ -1,6 +1,8 @@
+using AttachmentEnum;
 using HoneyErpAPI.Common;
 using HoneyErpAPI.Models;
 using HoneyErpAPI.Services;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Data.SqlClient;
 using System;
 using System.Data;
@@ -16,6 +18,8 @@ namespace HoneyErpAPI.Repository
         int InsertAttachment(AttachmentModel model);
         AttachmentModel? GetAttachment(string edid, string fileName);
         bool AddModuleAttachment(List<AttachmentModuleReq> req);
+        bool ClearModuleAttachments(string moduleName, string recordEdid);
+        List<AttachmentModuleRes> GetModuleAttachments(GetModuleAttachmentReq req);
     }
 
     public class CommonRepository : ICommonRepository
@@ -84,6 +88,9 @@ namespace HoneyErpAPI.Repository
                 case "EmployeeDocument":
                     res.Items = Enum.GetNames(typeof(EmployeeDocumentEnum)).ToList();
                     break;
+                case "CourierAttachmentType":
+                    res.Items = Enum.GetNames(typeof(CourierAttachmentType)).ToList();
+                    break;
 
                 default:
                     throw new HoneyErpException(ErrorCode.InvalidData, $"Enum type '{typeName}' is not supported or not found.");
@@ -105,23 +112,29 @@ namespace HoneyErpAPI.Repository
 
         public AttachmentModel? GetAttachment(string edid, string? fileName = null)
         {
-            int attachmentId;
-            if (!int.TryParse(edid, out attachmentId))
-            {
-                attachmentId = EncryptionHelper.Decrypt<int>(edid);
-            }
+            if (string.IsNullOrWhiteSpace(edid))
+                return null;
 
-            Microsoft.Data.SqlClient.SqlParameter[] p = new Microsoft.Data.SqlClient.SqlParameter[1];
+            int attachmentId = EncryptionHelper.Decrypt<int>(edid);
+
+            Microsoft.Data.SqlClient.SqlParameter[] p = new Microsoft.Data.SqlClient.SqlParameter[2];
             p[0] = new Microsoft.Data.SqlClient.SqlParameter("@Id", attachmentId);
+            p[1] = new Microsoft.Data.SqlClient.SqlParameter("@OriginalName", string.IsNullOrWhiteSpace(fileName) ? DBNull.Value : fileName);
 
-            string query = "SELECT originalName, storedName, filePath FROM AttachmentMaster WHERE id=@Id";
+            string query = @"SELECT originalName, storedName, filePath
+                             FROM AttachmentMaster
+                             WHERE id = @Id AND (@OriginalName IS NULL OR originalName = @OriginalName)";
             System.Data.DataTable dt = _client.ExecuteAdapter(query, p, System.Data.CommandType.Text).Tables[0];
 
             if (dt.Rows.Count > 0)
             {
+                string originalName = dt.Rows[0]["originalName"]?.ToString() ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(fileName) && !string.Equals(originalName, fileName, StringComparison.Ordinal))
+                    return null;
+
                 return new AttachmentModel
                 {
-                    OriginalName = dt.Rows[0]["originalName"]?.ToString() ?? "",
+                    OriginalName = originalName,
                     StoredName = dt.Rows[0]["storedName"]?.ToString() ?? "",
                     FilePath = dt.Rows[0]["filePath"]?.ToString() ?? ""
                 };
@@ -129,7 +142,6 @@ namespace HoneyErpAPI.Repository
 
             return null;
         }
-
 
         public bool AddModuleAttachment(List<AttachmentModuleReq> req)
         {
@@ -145,7 +157,7 @@ namespace HoneyErpAPI.Repository
             {
                 AttachmentModuleReq item = req[i];
 
-                parameters.Add(new SqlParameter("@ModuleName" + i, item.ModuleName));
+                parameters.Add(new SqlParameter("@ModuleName" + i, item.ModuleName.HasValue ? item.ModuleName.Value.ToString() : "Courier"));
                 parameters.Add(new SqlParameter("@RecordId" + i, EncryptionHelper.Decrypt<int>(item.RecordEdid)));
                 parameters.Add(new SqlParameter("@AttachmentType" + i, Utilities.DbValue(item.AttachmentType)));
                 parameters.Add(new SqlParameter("@AttachmentId" + i, EncryptionHelper.Decrypt<int>(item.AttachmentEdid)));
@@ -155,10 +167,68 @@ namespace HoneyErpAPI.Repository
                 values.Add("(@ModuleName" + i + ", @RecordId" + i + ", @AttachmentType" + i + ", @AttachmentId" + i + ", @Remarks" + i + ", @CreatedBy" + i + ")");
             }
 
-            string query = @"INSERT INTO ModuleAttachment(ModuleName, RecordId, AttachmentType, AttachmentId, Remarks, CreatedBy)
-                             VALUES " + string.Join(", ", values);
+            string query = @"BEGIN TRY
+                        BEGIN TRANSACTION;
 
-            return _client.ExecuteNonQuery(query, parameters.ToArray(), CommandType.Text) > 0;
+                        UPDATE ModuleAttachment SET IsActive = 0 WHERE ModuleName = @ModuleName0 AND RecordId = @RecordId0;
+
+                        MERGE ModuleAttachment AS target
+                        USING (VALUES " + string.Join(", ", values) + @") AS source (ModuleName, RecordId, AttachmentType, AttachmentId, Remarks, CreatedBy)
+                        ON target.ModuleName = source.ModuleName
+                        AND target.RecordId = source.RecordId
+                        AND target.AttachmentId = source.AttachmentId
+                        WHEN MATCHED THEN UPDATE SET target.AttachmentType = source.AttachmentType, target.Remarks = source.Remarks, target.CreatedBy = source.CreatedBy, target.IsActive = 1
+                        WHEN NOT MATCHED BY TARGET THEN INSERT (ModuleName, RecordId, AttachmentType, AttachmentId, Remarks, CreatedBy, IsActive)
+                        VALUES (source.ModuleName, source.RecordId, source.AttachmentType, source.AttachmentId, source.Remarks, source.CreatedBy, 1);
+
+                        COMMIT TRANSACTION;
+                    END TRY
+                    BEGIN CATCH
+                        IF @@TRANCOUNT > 0
+                            ROLLBACK TRANSACTION;
+
+                        THROW;
+                    END CATCH;";
+
+            return _client.ExecuteNonQuery(query, parameters.ToArray(), CommandType.Text) >= 0;
+        }
+
+        public bool ClearModuleAttachments(string moduleName, string recordEdid)
+        {
+            SqlParameter[] p = new SqlParameter[2];
+            p[0] = new SqlParameter("@ModuleName", moduleName);
+            p[1] = new SqlParameter("@RecordId", EncryptionHelper.Decrypt<int>(recordEdid));
+
+            string query = "UPDATE ModuleAttachment SET IsActive = 0 WHERE ModuleName = @ModuleName AND RecordId = @RecordId;";
+            return _client.ExecuteNonQuery(query, p, CommandType.Text) >= 0;
+        }
+
+        public List<AttachmentModuleRes> GetModuleAttachments(GetModuleAttachmentReq req)
+        {
+            SqlParameter[] p = new SqlParameter[2];
+            p[0] = new SqlParameter("@ModuleName", req.ModuleName);
+            p[1] = new SqlParameter("@RecordId", EncryptionHelper.Decrypt<int>(req.RecordEdid));
+
+            string query = @"SELECT a.Id AS AttachmentId, a.OriginalName, ma.AttachmentType, ma.Remarks FROM ModuleAttachment ma
+                     INNER JOIN AttachmentMaster a ON a.Id = ma.AttachmentId WHERE ma.ModuleName = @ModuleName
+                     AND ma.RecordId = @RecordId AND ma.IsActive = 1 ORDER BY ma.Id DESC";
+
+            DataTable dt = _client.ExecuteAdapter(query, p, CommandType.Text).Tables[0];
+
+            List<AttachmentModuleRes> result = new List<AttachmentModuleRes>();
+
+            foreach (DataRow row in dt.Rows)
+            {
+                AttachmentModuleRes document = new AttachmentModuleRes();
+                document.AttachmentEdid = EncryptionHelper.Encrypt(row.Field<int>("AttachmentId").ToString());
+                document.AttachmentOriginalName = row.Field<string>("OriginalName") ?? "";
+                document.AttachmentType = row.Field<string>("AttachmentType");
+                document.Remarks = row.Field<string?>("Remarks");
+
+                result.Add(document);
+            }
+
+            return result;
         }
     }
 }

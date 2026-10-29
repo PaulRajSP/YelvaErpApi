@@ -205,28 +205,35 @@ namespace HoneyErpAPI.DocumentHandlers.DeliverySlip
             // 1. Resolve Courier Name and ID
             string courierName = !string.IsNullOrWhiteSpace(pkg?.Courier) ? pkg.Courier.Trim() : string.Empty;
             int resolvedCourierId = pkg?.CourierId ?? 0;
+
             if (resolvedCourierId <= 0 && !string.IsNullOrWhiteSpace(pkg?.Courier))
             {
-                GetCourierListReq req = new GetCourierListReq
-                {
-                    OnlyActive = false
-                };
+                GetCourierListReq req = new GetCourierListReq();
+                req.OnlyActive = false;
 
-                var allCouriers = _courierRepo.GetAll(req)?.Items;
-                var matched = allCouriers?.FirstOrDefault(c => c.Name.Equals(pkg.Courier, StringComparison.OrdinalIgnoreCase));
+                List<CourierListItem>? allCouriers = _courierRepo.GetAll(req)?.Items;
+
+                CourierListItem? matched = allCouriers?.FirstOrDefault(c =>
+                    c.Name.Equals(pkg.Courier.Trim(), StringComparison.OrdinalIgnoreCase));
+
                 if (matched != null)
                 {
-                    resolvedCourierId = matched.Id;
+                    resolvedCourierId = EncryptionHelper.Decrypt<int>(matched.Edid);
                     courierName = matched.Name;
                 }
             }
 
             if (resolvedCourierId <= 0)
             {
-                var firstActive = _courierRepo.GetAll(new GetCourierListReq { OnlyActive = true })?.Items?.FirstOrDefault();
+                GetCourierListReq req = new GetCourierListReq();
+                req.OnlyActive = true;
+
+                CourierListItem? firstActive = _courierRepo.GetAll(req)?.Items?.FirstOrDefault();
+
                 if (firstActive != null)
                 {
-                    resolvedCourierId = firstActive.Id;
+                    resolvedCourierId = EncryptionHelper.Decrypt<int>(firstActive.Edid);
+
                     if (string.IsNullOrWhiteSpace(courierName))
                         courierName = firstActive.Name;
                 }

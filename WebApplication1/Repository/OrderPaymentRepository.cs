@@ -46,17 +46,7 @@ namespace HoneyErpAPI.Repository
 
         public int InsertPayment(int orderId, string transactionNumber, RecordOrderPaymentReq req, DateTime paymentDate)
         {
-            int? docId = req.DocId;
-            if (!docId.HasValue && !string.IsNullOrWhiteSpace(req.DocEdid))
-            {
-                string decrypted = EncryptionHelper.Decrypt(req.DocEdid);
-                if (int.TryParse(decrypted, out int parsedId))
-                    docId = parsedId;
-                else if (int.TryParse(req.DocEdid, out int rawId))
-                    docId = rawId;
-            }
-
-            SqlParameter[] p = new SqlParameter[10];
+            SqlParameter[] p = new SqlParameter[9];
             p[0] = new SqlParameter("@OrderId", orderId);
             p[1] = new SqlParameter("@TransactionNumber", transactionNumber);
             p[2] = new SqlParameter("@PaymentMethod", req.PaymentMethod.ToString());
@@ -66,11 +56,10 @@ namespace HoneyErpAPI.Repository
             p[6] = new SqlParameter("@PaymentReference", Utilities.DbValue(req.PaymentReference));
             p[7] = new SqlParameter("@PaymentDate", paymentDate);
             p[8] = new SqlParameter("@Remark", Utilities.DbValue(req.Remark));
-            p[9] = new SqlParameter("@DocId", (object?)docId ?? DBNull.Value);
 
-            string insertQuery = @"INSERT INTO OrderPayment (orderId, transactionNumber, paymentMethod, paymentType, amount, status, paymentReference, paymentDate, remark, docId, createdAt)
+            string insertQuery = @"INSERT INTO OrderPayment (orderId, transactionNumber, paymentMethod, paymentType, amount, status, paymentReference, paymentDate, remark, createdAt)
                                    OUTPUT INSERTED.Id
-                                   VALUES (@OrderId, @TransactionNumber, @PaymentMethod, @PaymentType, @Amount, @Status, @PaymentReference, @PaymentDate, @Remark, @DocId, SYSUTCDATETIME())";
+                                   VALUES (@OrderId, @TransactionNumber, @PaymentMethod, @PaymentType, @Amount, @Status, @PaymentReference, @PaymentDate, @Remark, SYSUTCDATETIME())";
 
             return _client.ExecuteScalar<int>(insertQuery, p, CommandType.Text);
         }
@@ -99,16 +88,13 @@ namespace HoneyErpAPI.Repository
         public List<OrderPaymentItem> GetPaymentsByOrderId(int orderId, string orderEdid)
         {
             SqlParameter[] p = { new SqlParameter("@OrderId", orderId) };
-            string query = @"SELECT id, orderId, transactionNumber, paymentMethod, paymentType, amount, status, paymentReference, paymentDate, remark, docId, createdAt
+            string query = @"SELECT id, orderId, transactionNumber, paymentMethod, paymentType, amount, status, paymentReference, paymentDate, remark, createdAt
                              FROM OrderPayment WHERE orderId=@OrderId ORDER BY createdAt DESC";
             DataTable dt = _client.ExecuteAdapter(query, p, CommandType.Text).Tables[0];
 
             List<OrderPaymentItem> items = new List<OrderPaymentItem>();
             foreach (DataRow row in dt.Rows)
             {
-                int? docId = row.IsNull("docId") ? (int?)null : Convert.ToInt32(row["docId"]);
-                string? docEdid = docId.HasValue ? EncryptionHelper.Encrypt(docId.Value.ToString()) : null;
-
                 items.Add(new OrderPaymentItem
                 {
                     Edid = EncryptionHelper.Encrypt(row.Field<int>("id").ToString()),
@@ -121,8 +107,6 @@ namespace HoneyErpAPI.Repository
                     PaymentReference = row.Field<string?>("paymentReference"),
                     PaymentDate = row.Field<DateTime?>("paymentDate"),
                     Remark = row.Field<string?>("remark"),
-                    DocId = docId,
-                    DocEdid = docEdid,
                     CreatedAt = row.Field<DateTime>("createdAt")
                 });
             }
@@ -133,7 +117,7 @@ namespace HoneyErpAPI.Repository
         public OrderPaymentRecord? GetPaymentById(int paymentId)
         {
             SqlParameter[] p = { new SqlParameter("@Id", paymentId) };
-            string query = @"SELECT p.id, p.orderId, o.orderNumber, p.transactionNumber, p.paymentMethod, p.paymentType, p.amount, p.status, p.paymentReference, p.paymentDate, p.remark, p.docId, p.createdAt
+            string query = @"SELECT p.id, p.orderId, o.orderNumber, p.transactionNumber, p.paymentMethod, p.paymentType, p.amount, p.status, p.paymentReference, p.paymentDate, p.remark, p.createdAt
                              FROM OrderPayment p
                              LEFT JOIN OrderMaster o ON p.orderId = o.id
                              WHERE p.id=@Id";
@@ -142,9 +126,6 @@ namespace HoneyErpAPI.Repository
                 return null;
 
             DataRow row = dt.Rows[0];
-            int? docId = row.IsNull("docId") ? (int?)null : Convert.ToInt32(row["docId"]);
-            string? docEdid = docId.HasValue ? EncryptionHelper.Encrypt(docId.Value.ToString()) : null;
-
             return new OrderPaymentRecord
             {
                 Id = row.Field<int>("id"),
@@ -158,8 +139,6 @@ namespace HoneyErpAPI.Repository
                 PaymentReference = row.Field<string?>("paymentReference"),
                 PaymentDate = row.Field<DateTime?>("paymentDate"),
                 Remark = row.Field<string?>("remark"),
-                DocId = docId,
-                DocEdid = docEdid,
                 CreatedAt = row.Field<DateTime>("createdAt")
             };
         }

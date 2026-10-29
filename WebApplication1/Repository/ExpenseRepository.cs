@@ -112,17 +112,17 @@ namespace HoneyErpAPI.Repository
             string query = @"
                 INSERT INTO ExpenseMaster (
                     expenseNumber, title, category, amount, expenseDate,
-                    paymentMode, paidTo, referenceNumber, docEdid, status,
+                    paymentMode, paidTo, referenceNumber, status,
                     remarks, recordedBy, createdAt, updatedAt
                 )
                 OUTPUT INSERTED.id
                 VALUES (
                     @ExpenseNumber, @Title, @Category, @Amount, @ExpenseDate,
-                    @PaymentMode, @PaidTo, @ReferenceNumber, @DocEdid, @Status,
+                    @PaymentMode, @PaidTo, @ReferenceNumber, @Status,
                     @Remarks, @RecordedBy, GETUTCDATE(), GETUTCDATE()
                 );";
 
-            SqlParameter[] p = new SqlParameter[12];
+            SqlParameter[] p = new SqlParameter[11];
             p[0]  = new SqlParameter("@ExpenseNumber", expenseNumber);
             p[1]  = new SqlParameter("@Title", req.Title ?? string.Empty);
             p[2]  = new SqlParameter("@Category", req.Category ?? string.Empty);
@@ -131,10 +131,9 @@ namespace HoneyErpAPI.Repository
             p[5]  = new SqlParameter("@PaymentMode", req.PaymentMode ?? string.Empty);
             p[6]  = new SqlParameter("@PaidTo", Utilities.DbValue(req.PaidTo));
             p[7]  = new SqlParameter("@ReferenceNumber", Utilities.DbValue(req.ReferenceNumber));
-            p[8]  = new SqlParameter("@DocEdid", Utilities.DbValue(req.DocEdid));
-            p[9]  = new SqlParameter("@Status", req.Status ?? string.Empty);
-            p[10] = new SqlParameter("@Remarks", Utilities.DbValue(req.Remarks));
-            p[11] = new SqlParameter("@RecordedBy", Utilities.DbValue(req.RecordedBy));
+            p[8]  = new SqlParameter("@Status", req.Status ?? string.Empty);
+            p[9]  = new SqlParameter("@Remarks", Utilities.DbValue(req.Remarks));
+            p[10] = new SqlParameter("@RecordedBy", Utilities.DbValue(req.RecordedBy));
 
             int insertedId = _client.ExecuteScalar<int>(query, p, CommandType.Text);
 
@@ -168,14 +167,13 @@ namespace HoneyErpAPI.Repository
                     paymentMode = @PaymentMode,
                     paidTo = @PaidTo,
                     referenceNumber = @ReferenceNumber,
-                    docEdid = @DocEdid,
                     status = @Status,
                     remarks = @Remarks,
                     recordedBy = COALESCE(@RecordedBy, recordedBy),
                     updatedAt = GETUTCDATE()
                 WHERE id = @Id;";
 
-            SqlParameter[] p = new SqlParameter[12];
+            SqlParameter[] p = new SqlParameter[11];
             p[0]  = new SqlParameter("@Id", id);
             p[1]  = new SqlParameter("@Title", req.Title ?? string.Empty);
             p[2]  = new SqlParameter("@Category", req.Category ?? string.Empty);
@@ -184,10 +182,9 @@ namespace HoneyErpAPI.Repository
             p[5]  = new SqlParameter("@PaymentMode", req.PaymentMode ?? string.Empty);
             p[6]  = new SqlParameter("@PaidTo", Utilities.DbValue(req.PaidTo));
             p[7]  = new SqlParameter("@ReferenceNumber", Utilities.DbValue(req.ReferenceNumber));
-            p[8]  = new SqlParameter("@DocEdid", Utilities.DbValue(req.DocEdid));
-            p[9]  = new SqlParameter("@Status", req.Status ?? string.Empty);
-            p[10] = new SqlParameter("@Remarks", Utilities.DbValue(req.Remarks));
-            p[11] = new SqlParameter("@RecordedBy", Utilities.DbValue(req.RecordedBy));
+            p[8]  = new SqlParameter("@Status", req.Status ?? string.Empty);
+            p[9]  = new SqlParameter("@Remarks", Utilities.DbValue(req.Remarks));
+            p[10] = new SqlParameter("@RecordedBy", Utilities.DbValue(req.RecordedBy));
 
             bool updated = _client.ExecuteNonQuery(query, p, CommandType.Text) > 0;
 
@@ -390,7 +387,7 @@ namespace HoneyErpAPI.Repository
                 PaymentMode           = row["paymentMode"]?.ToString() ?? "",
                 PaidTo                = row["paidTo"] == DBNull.Value ? null : row["paidTo"]?.ToString(),
                 ReferenceNumber       = row["referenceNumber"] == DBNull.Value ? null : row["referenceNumber"]?.ToString(),
-                DocEdid               = row["docEdid"] == DBNull.Value ? null : row["docEdid"]?.ToString(),
+                LegacyDocEdid         = row["docEdid"] == DBNull.Value ? null : row["docEdid"]?.ToString(),
                 Status                = row["status"]?.ToString() ?? "",
                 Remarks               = row["remarks"] == DBNull.Value ? null : row["remarks"]?.ToString(),
                 RecordedBy            = row["recordedBy"] == DBNull.Value ? null : row["recordedBy"]?.ToString(),

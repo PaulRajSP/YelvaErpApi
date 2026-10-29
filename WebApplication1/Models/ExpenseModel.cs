@@ -1,4 +1,5 @@
 using HoneyErpAPI.Common;
+using System.Text.Json.Serialization;
 using static WebApplication1.Common.Models;
 
 namespace HoneyErpAPI.Models
@@ -14,7 +15,9 @@ namespace HoneyErpAPI.Models
         public string   PaymentMode     { get; set; } = string.Empty;
         public string?  PaidTo          { get; set; }
         public string?  ReferenceNumber { get; set; }
-        public string?  DocEdid         { get; set; }
+        [JsonIgnore]
+        public string?  LegacyDocEdid   { get; set; }
+        public List<AttachmentModuleRes> AttachmentData { get; set; } = new();
         public string   Status          { get; set; } = string.Empty;
         public string?  Remarks         { get; set; }
         public string?  RecordedBy      { get; set; }
@@ -44,7 +47,7 @@ namespace HoneyErpAPI.Models
         public string    PaymentMode     { get; set; } = string.Empty;
         public string?   PaidTo          { get; set; }
         public string?   ReferenceNumber { get; set; }
-        public string?   DocEdid         { get; set; }
+        public List<DocumentAttachmentReq>? AttachmentData { get; set; }
         public string    Status          { get; set; } = string.Empty;
         public string?   Remarks         { get; set; }
         public string?   RecordedBy      { get; set; }
@@ -59,7 +62,7 @@ namespace HoneyErpAPI.Models
         public string    PaymentMode     { get; set; } = string.Empty;
         public string?   PaidTo          { get; set; }
         public string?   ReferenceNumber { get; set; }
-        public string?   DocEdid         { get; set; }
+        public List<DocumentAttachmentReq>? AttachmentData { get; set; }
         public string    Status          { get; set; } = string.Empty;
         public string?   Remarks         { get; set; }
         public string?   RecordedBy      { get; set; }
