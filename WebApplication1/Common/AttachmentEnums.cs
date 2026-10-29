@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace WebApplication1.Common
+namespace AttachmentEnum
 {
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum AttachmentModule

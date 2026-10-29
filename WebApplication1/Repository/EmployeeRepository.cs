@@ -340,7 +340,7 @@ namespace HoneyErpAPI.Repository
                         INSERT INTO EmployeePermittedRole (employeeMstId, role)
                         VALUES (@EmployeeMstId, @Role);";
 
-                    string normalizedRole = Enum.TryParse<Enum>(role.Trim(), true, out var parsedRole)
+                    string normalizedRole = Enum.TryParse<RoleEnum>(role.Trim(), true, out var parsedRole)
                         ? parsedRole.ToString()
                         : role.Trim();
 
@@ -421,7 +421,7 @@ namespace HoneyErpAPI.Repository
                         INSERT INTO EmployeePermittedRole (employeeMstId, role)
                         VALUES (@EmployeeId, @Role);";
 
-                    string normalizedRole = Enum.TryParse<Enum>(role.Trim(), true, out var parsedRole)
+                    string normalizedRole = Enum.TryParse<RoleEnum>(role.Trim(), true, out var parsedRole)
                         ? parsedRole.ToString()
                         : role.Trim();
 
@@ -455,7 +455,7 @@ namespace HoneyErpAPI.Repository
             }
 
             // Ensure all enum roles are present
-            foreach (var enumRole in Enum.GetNames<Enum>())
+            foreach (var enumRole in Enum.GetNames<RoleEnum>())
             {
                 if (!roles.Any(r => r.Equals(enumRole, StringComparison.OrdinalIgnoreCase)))
                 {
