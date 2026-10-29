@@ -91,16 +91,14 @@ namespace HoneyErpAPI.Services
                 DocumentOriginalName = originalName
             };
         }
-        public AttachmentModel GetAttachment(string edid, string? fileName = null)
+
+        public AttachmentModel GetAttachment(string edid,string fileName)
         {
             var model = _repo.GetAttachment(edid, fileName);
             if (model == null || string.IsNullOrEmpty(model.FilePath))
                 throw new HoneyErpException(ErrorCode.NotFound, "Attachment not found.");
             return model;
         }
-
-
-
 
         public static string GetContentType(string ext)
         {
@@ -120,6 +118,21 @@ namespace HoneyErpAPI.Services
                 ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 _ => "application/octet-stream"
             };
+        }
+
+        public bool AddModuleAttachment(List<AttachmentModuleReq> req, bool isMutiAttachemtn)
+        {
+            if (req == null || req.Count == 0)
+            {
+                return false;
+            }
+
+            if (!isMutiAttachemtn)
+            {
+                req = req.Take(1).ToList();
+            }
+
+            return _repo.AddModuleAttachment(req);
         }
     }
 }

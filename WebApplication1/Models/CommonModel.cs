@@ -1,4 +1,4 @@
-using HoneyErpAPI.Common;
+using WebApplication1.Common;
 
 namespace HoneyErpAPI.Models
 {
@@ -24,4 +24,15 @@ namespace HoneyErpAPI.Models
     {
         public Microsoft.AspNetCore.Http.IFormFile file { get; set; }
     }
+
+
+    public class AttachmentModuleReq
+    {
+        public AttachmentModule ModuleName { get; set; }
+        public string RecordEdid { get; set; }
+        public string? AttachmentType { get; set; }
+        public string AttachmentEdid { get; set; }
+        public string? Remarks { get; set; }
+    }
+
 }
