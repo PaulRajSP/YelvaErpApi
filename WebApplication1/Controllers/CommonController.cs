@@ -10,6 +10,7 @@ using System;
 using System.IO;
 using System.Net.Http;
 using System.Threading.Tasks;
+using static WebApplication1.Common.Models;
 
 namespace HoneyErpAPI.Controllers
 {
@@ -41,7 +42,7 @@ namespace HoneyErpAPI.Controllers
         [HttpPost("upload")]
         public async Task<IActionResult> Upload(IFormFile? file)
         {
-            ApiResponseModel<DocumentModel> res = new ApiResponseModel<DocumentModel>();
+            ApiResponseModel<AttachmentModuleRes> res = new ApiResponseModel<AttachmentModuleRes>();
             res.Success = true;
             res.Data= await _service.SaveAttachment(file);
 
@@ -53,6 +54,8 @@ namespace HoneyErpAPI.Controllers
         {
             if (string.IsNullOrWhiteSpace(edid))
                 return BadRequest("Attachment identifier is required.");
+            if (string.IsNullOrWhiteSpace(fileName) || !string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal))
+                return BadRequest("A valid attachment filename is required.");
 
             try
             {
@@ -131,5 +134,15 @@ namespace HoneyErpAPI.Controllers
             }
         }
 
+
+        [HttpGet("module-attachment")]
+        public IActionResult GetModuleAttachment([FromQuery] GetModuleAttachmentReq req)
+        {
+            ApiResponseModel<ListResult<AttachmentModuleRes>> resp=new ApiResponseModel<ListResult<AttachmentModuleRes>>();
+            resp.Data = _service.GetModuleAttachments(req);
+            resp.Success = true;
+
+            return Ok(resp);
+        }
     }
 }

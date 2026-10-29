@@ -362,18 +362,7 @@ namespace HoneyErpAPI.Repository
             SqlParameter[] cp = { new SqlParameter("@MaterialId", materialId) };
             int total = _client.ExecuteScalar<int>(countQuery, cp, CommandType.Text);
 
-            string ensureDocIdQuery = @"
-                IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'PurchaseMaster' AND COLUMN_NAME = 'docId')
-                BEGIN
-                    ALTER TABLE PurchaseMaster ADD docId INT NULL;
-                END";
-            try
-            {
-                _client.ExecuteNonQuery(ensureDocIdQuery, null, CommandType.Text);
-            }
-            catch { }
-
-            string query = @"SELECT pm.id AS invoiceNumber, pm.docId, sm.name AS supplierName, mb.batchNumber,
+            string query = @"SELECT pm.id AS invoiceNumber, sm.name AS supplierName, mb.batchNumber,
                             pi.quantity AS qty, pi.rate, pm.date
                      FROM PurchaseItem pi
                      INNER JOIN PurchaseMaster pm ON pi.purchaseId = pm.id
@@ -394,16 +383,12 @@ namespace HoneyErpAPI.Repository
 
             foreach (DataRow row in dt.Rows)
             {
-                int? docId = (row.Table.Columns.Contains("docId") && !row.IsNull("docId")) ? Convert.ToInt32(row["docId"]) : (int?)null;
-                string? docEdid = docId.HasValue ? EncryptionHelper.Encrypt(docId.Value.ToString()) : null;
                 string invNum = Convert.ToString(row["invoiceNumber"]) ?? string.Empty;
 
                 res.Items.Add(new MaterialPurchaseHistoryItem
                 {
                     InvoiceNumber = invNum,
                     PurchaseEdid = EncryptionHelper.Encrypt(invNum),
-                    DocId = docId,
-                    DocEdid = docEdid,
                     SupplierName = row.Field<string>("supplierName") ?? string.Empty,
                     BatchNumber = row.Field<string?>("batchNumber") ?? string.Empty,
                     Quantity = row.Field<decimal>("qty"),

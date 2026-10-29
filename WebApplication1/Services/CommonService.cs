@@ -1,5 +1,6 @@
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using AttachmentEnum;
 using HoneyErpAPI.Common;
 using HoneyErpAPI.Models;
 using HoneyErpAPI.Repository;
@@ -7,10 +8,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Data;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
+using static WebApplication1.Common.Models;
 
 namespace HoneyErpAPI.Services
 {
@@ -38,7 +41,7 @@ namespace HoneyErpAPI.Services
             return _repo.GetEnumValues(typeName);
         }
 
-        public async Task<DocumentModel> SaveAttachment(IFormFile file)
+        public async Task<AttachmentModuleRes> SaveAttachment(IFormFile file)
         {
             if (file == null || file.Length == 0)
             {
@@ -85,22 +88,20 @@ namespace HoneyErpAPI.Services
             int attachmentId = _repo.InsertAttachment(model);
 
             string edid = EncryptionHelper.Encrypt(attachmentId.ToString());
-            return new DocumentModel
+            return new AttachmentModuleRes
             {
-                DocumentEdid = edid,
-                DocumentOriginalName = originalName
+                AttachmentEdid = edid,
+                AttachmentOriginalName = originalName
             };
         }
-        public AttachmentModel GetAttachment(string edid, string? fileName = null)
+
+        public AttachmentModel GetAttachment(string edid,string fileName)
         {
             var model = _repo.GetAttachment(edid, fileName);
             if (model == null || string.IsNullOrEmpty(model.FilePath))
                 throw new HoneyErpException(ErrorCode.NotFound, "Attachment not found.");
             return model;
         }
-
-
-
 
         public static string GetContentType(string ext)
         {
@@ -120,6 +121,79 @@ namespace HoneyErpAPI.Services
                 ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 _ => "application/octet-stream"
             };
+        }
+
+        public bool AddModuleAttachment(List<AttachmentModuleReq> req, bool isMutiAttachemtn)
+        {
+            if (req == null || req.Count == 0)
+            {
+                return false;
+            }
+
+            if (!isMutiAttachemtn)
+            {
+                req = req.Take(1).ToList();
+            }
+
+            return _repo.AddModuleAttachment(req);
+        }
+
+        public bool SetModuleAttachments(List<AttachmentModuleReq> req)
+        {
+            if (req.Count > 0)
+                return _repo.AddModuleAttachment(req);
+
+            return true;
+        }
+
+        public bool ClearModuleAttachments(string moduleName, string recordEdid)
+        {
+            return _repo.ClearModuleAttachments(moduleName, recordEdid);
+
+            return true;
+        }
+
+        public bool SetModuleAttachments(List<DocumentAttachmentReq>? attachments, AttachmentModule moduleName, string recordEdid)
+        {
+            if (attachments == null || attachments.Count == 0)
+                return true;
+
+            List<AttachmentModuleReq> requests = attachments
+                .Where(item => !string.IsNullOrWhiteSpace(item.AttachmentEdid))
+                .Select(item => new AttachmentModuleReq
+                {
+                    AttachmentEdid = item.AttachmentEdid,
+                    RecordEdid = recordEdid,
+                    ModuleName = moduleName,
+                    AttachmentType = item.AttachmentType ?? "Document",
+                    Remarks = item.Remarks ?? string.Empty
+                })
+                .ToList();
+
+            return requests.Count == 0 || _repo.AddModuleAttachment(requests);
+        }
+
+        public List<AttachmentModuleRes> GetModuleAttachments(AttachmentModule moduleName, string recordEdid)
+        {
+            return _repo.GetModuleAttachments(new GetModuleAttachmentReq
+            {
+                ModuleName = moduleName.ToString(),
+                RecordEdid = recordEdid
+            });
+        }
+
+        public ListResult<AttachmentModuleRes> GetModuleAttachments(GetModuleAttachmentReq req)
+        {
+            if (string.IsNullOrWhiteSpace(req.ModuleName))
+                throw new HoneyErpException(ErrorCode.ValidationFailed, "Module name is required.");
+
+            if (string.IsNullOrWhiteSpace(req.RecordEdid))
+                throw new HoneyErpException(ErrorCode.ValidationFailed, "Record EDID is required.");
+
+            ListResult<AttachmentModuleRes> res = new ListResult<AttachmentModuleRes>();
+            res.Items = _repo.GetModuleAttachments(req);
+
+            return res;
         }
     }
 }

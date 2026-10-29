@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using HoneyErpAPI.Common;
 using HoneyErpAPI.Models;
 using HoneyErpAPI.Repository;
+using AttachmentEnum;
 
 namespace HoneyErpAPI.Services
 {
@@ -11,15 +12,18 @@ namespace HoneyErpAPI.Services
         private readonly IOrderPaymentRepository _paymentRepo;
         private readonly ITransactionRepository _transactionRepo;
         private readonly IPaymentTransactionRepository _paymentTransactionRepo;
+        private readonly CommonService _commonService;
 
         public OrderPaymentService(
             IOrderPaymentRepository paymentRepo,
             ITransactionRepository transactionRepo,
-            IPaymentTransactionRepository paymentTransactionRepo)
+            IPaymentTransactionRepository paymentTransactionRepo,
+            CommonService commonService)
         {
             _paymentRepo = paymentRepo;
             _transactionRepo = transactionRepo;
             _paymentTransactionRepo = paymentTransactionRepo;
+            _commonService = commonService;
         }
 
         public RecordOrderPaymentRes RecordPayment(string orderEdid, RecordOrderPaymentReq req)
@@ -50,6 +54,9 @@ namespace HoneyErpAPI.Services
             DateTime paymentDate = req.PaymentDate ?? DateTime.UtcNow;
 
             int paymentId = _paymentRepo.InsertPayment(orderId, transactionNumber, req, paymentDate);
+            string paymentEdid = EncryptionHelper.Encrypt(paymentId.ToString());
+            if (req.AttachmentData != null)
+                _commonService.SetModuleAttachments(MapAttachments(req.AttachmentData), AttachmentModule.OrderPayment, paymentEdid);
 
             decimal netPaidAfter = _paymentRepo.ComputeNetPaid(orderId);
             PaymentStatus newStatus;
@@ -100,7 +107,7 @@ namespace HoneyErpAPI.Services
 
             return new RecordOrderPaymentRes
             {
-                Edid = EncryptionHelper.Encrypt(paymentId.ToString()),
+                Edid = paymentEdid,
                 TransactionNumber = transactionNumber,
                 OrderId = orderId,
                 OrderEdid = orderEdid,
@@ -109,7 +116,8 @@ namespace HoneyErpAPI.Services
                 TotalAmount = order.TotalAmount,
                 AmountPaid = netPaidAfter,
                 BalanceAmount = Math.Max(0m, order.TotalAmount - netPaidAfter),
-                PaymentStatus = newStatus.ToString()
+                PaymentStatus = newStatus.ToString(),
+                AttachmentData = _commonService.GetModuleAttachments(AttachmentModule.OrderPayment, paymentEdid)
             };
         }
 
@@ -125,6 +133,8 @@ namespace HoneyErpAPI.Services
 
             decimal netPaid = _paymentRepo.ComputeNetPaid(orderId);
             List<OrderPaymentItem> payments = _paymentRepo.GetPaymentsByOrderId(orderId, orderEdid);
+            foreach (OrderPaymentItem payment in payments)
+                LoadAttachments(payment);
 
             return new GetOrderPaymentsRes
             {
@@ -136,6 +146,21 @@ namespace HoneyErpAPI.Services
                 PaymentStatus = order.PaymentStatus,
                 Payments = payments
             };
+        }
+
+        private void LoadAttachments(OrderPaymentItem payment)
+        {
+            payment.AttachmentData = _commonService.GetModuleAttachments(AttachmentModule.OrderPayment, payment.Edid);
+        }
+
+        private static List<DocumentAttachmentReq> MapAttachments(List<OrderPaymentAttachmentReq> attachments)
+        {
+            return attachments.Select(item => new DocumentAttachmentReq
+            {
+                AttachmentEdid = item.AttachmentEdid,
+                AttachmentType = item.AttachmentType.ToString(),
+                Remarks = item.Remarks
+            }).ToList();
         }
 
         public OrderPaymentSummaryRes GetPaymentSummary(string orderEdid)

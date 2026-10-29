@@ -2,6 +2,7 @@ using HoneyErpAPI.Common;
 using HoneyErpAPI.Models;
 using HoneyErpAPI.Services;
 using Microsoft.AspNetCore.Mvc;
+using static WebApplication1.Common.Models;
 
 namespace HoneyErpAPI.Controllers
 {
@@ -21,34 +22,22 @@ namespace HoneyErpAPI.Controllers
         [HttpPost("list")]
         public IActionResult Get([FromBody] GetCourierListReq req)
         {
-            ApiResponseModel<GetCourierListRes> res = new ApiResponseModel<GetCourierListRes>();
+            ApiResponseModel<PageResult<CourierListItem>> res = new ApiResponseModel<PageResult<CourierListItem>>();
             res.Success = true;
             res.Data = _service.GetAll(req);
             res.Message = "Couriers fetched successfully";
             return Ok(res);
         }
 
-        [HttpGet("{id}")]
-        public IActionResult GetById(string id)
+        [HttpGet("{Edid}/{CourierName}")]
+        public IActionResult GetById(string Edid, string CourierName)
         {
-            var courier = _service.GetById(id);
-            if (courier == null)
-            {
-                return NotFound(new
-                {
-                    success = false,
-                    message = "Courier not found"
-                });
-            }
+            ApiResponseModel<CourierDetailsRes> res = new ApiResponseModel<CourierDetailsRes>();
+            res.Success = true;
+            res.Data = _service.GetById(Edid, CourierName);
 
-            return Ok(new ApiResponseModel<CourierListItem>
-            {
-                Success = true,
-                Data = courier,
-                Message = "Courier fetched successfully"
-            });
+            return Ok(res);
         }
-
 
         [HttpPost]
         public IActionResult Add([FromBody] AddCourierReq req)
@@ -60,18 +49,15 @@ namespace HoneyErpAPI.Controllers
             return Ok(res);
         }
 
-        [HttpPut("{Edid}")]
-        public IActionResult Update([FromBody] UpdateCourierReq req)
+        [HttpPut("{Edid}/{CourierName}")]
+        public IActionResult Update(string Edid, string CourierName, [FromBody] UpdateCourierReq req)
         {
-            _service.Update(req);
+            ApiResponseModel<UpdateCourierRes> resp = new ApiResponseModel<UpdateCourierRes>();
+            req.Edid = Edid;
+            resp.Data= _service.Update(req, CourierName);
 
-
-            return Ok(new ApiResponseModel<UpdateCourierRes>
-            {
-                Success = true,
-                Data = new UpdateCourierRes { Success = true },
-                Message = "Courier updated successfully"
-            });
+            resp.Success = true;
+            return Ok(resp);
         }
     }
 }

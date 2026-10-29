@@ -11,8 +11,9 @@ namespace HoneyErpAPI.Repository
         PageResult<PurchaseListItem> GetAll(GetPurchaseListReq req);
         GetPurchaseListRes  GetBySupplier(GetPurchasesBySupplierReq req);
         GetPurchaseByIdRes? GetById(string edid);
+        List<PurchasePaymentItem> GetPayments(string purchaseEdid);
         CreatePurchaseRes   Create(CreatePurchaseReq req);
-        bool RecordPayment(string purchaseEdid, string supplierEdid, decimal amount, string newStatus);
+        int RecordPayment(string purchaseEdid, string supplierEdid, PayPurchaseDueReq req, string newStatus, decimal paidAmountDelta, string transactionNumber);
         bool UpdateStatus(string edid, string status);
         GetPurchaseItemsRes GetItems(GetPurchaseItemsReq req);
     }
@@ -30,13 +31,12 @@ namespace HoneyErpAPI.Repository
             int pageSize = req.Pagination.PageSize > 0 ? req.Pagination.PageSize : 10;
             int offset = (pageNumber - 1) * pageSize;
 
-            string query = @"SELECT COUNT(*) OVER() AS TotalRecords, p.id, p.docId, p.supplierId,
+            string query = @"SELECT COUNT(*) OVER() AS TotalRecords, p.id, p.supplierId,
                             s.name AS supplierName, p.date, p.totalAmount, p.status,
                             p.paidAmount, (p.totalAmount - p.paidAmount) AS balance,
-                            a.originalName AS documentOriginalName
+                            CAST(NULL AS NVARCHAR(255)) AS documentOriginalName
                      FROM PurchaseMaster p
                      INNER JOIN SupplierMaster s ON p.supplierId = s.id
-                     LEFT JOIN AttachmentMaster a ON p.docId = a.id
                      WHERE (@Status IS NULL OR p.status = @Status)
                        AND (@FromDate IS NULL OR CAST(p.date AS DATE) >= CAST(@FromDate AS DATE))
                        AND (@ToDate IS NULL OR CAST(p.date AS DATE) <= CAST(@ToDate AS DATE))
@@ -63,10 +63,6 @@ namespace HoneyErpAPI.Repository
 
             foreach (DataRow row in dt.Rows)
             {
-                int? docId = (dt.Columns.Contains("docId") && !row.IsNull("docId")) ? Convert.ToInt32(row["docId"]) : (int?)null;
-                string? docEdid = docId.HasValue ? EncryptionHelper.Encrypt(docId.Value.ToString()) : null;
-                string? docOriginalName = (dt.Columns.Contains("documentOriginalName") && !row.IsNull("documentOriginalName")) ? row.Field<string>("documentOriginalName") : null;
-
                 res.Items.Add(new PurchaseListItem
                 {
                     Edid = EncryptionHelper.Encrypt(row.Field<int>("id").ToString()),
@@ -78,11 +74,6 @@ namespace HoneyErpAPI.Repository
                     PaidAmount = row.Field<decimal>("paidAmount"),
                     Balance = Convert.ToDecimal(row["balance"]),
                     Status = (Convert.ToDecimal(row["balance"]) <= 0 && row.Field<decimal>("totalAmount") > 0) ? "PAID" : row.Field<string>("status")!,
-                    AttachmentData = !string.IsNullOrWhiteSpace(docEdid) ? new DocumentModel
-                    {
-                        DocumentEdid = docEdid,
-                        DocumentOriginalName = docOriginalName
-                    } : null
                 });
             }
 
@@ -95,13 +86,12 @@ namespace HoneyErpAPI.Repository
             int pageSize = req.PageSize > 0 ? req.PageSize : 10;
             int offset = (pageNumber - 1) * pageSize;
 
-            string query = @"SELECT COUNT(*) OVER() AS TotalRecords, p.id, p.docId, p.supplierId, s.name AS supplierName,
+            string query = @"SELECT COUNT(*) OVER() AS TotalRecords, p.id, p.supplierId, s.name AS supplierName,
                             p.date, p.totalAmount, p.status, p.paidAmount,
                             (p.totalAmount - p.paidAmount) AS balance,
-                            a.originalName AS documentOriginalName
+                            CAST(NULL AS NVARCHAR(255)) AS documentOriginalName
                      FROM PurchaseMaster p
                      INNER JOIN SupplierMaster s ON p.supplierId = s.id
-                     LEFT JOIN AttachmentMaster a ON p.docId = a.id
                      WHERE p.supplierId = @SupplierId
                        AND (@FromDate IS NULL OR CAST(p.date AS DATE) >= CAST(@FromDate AS DATE))
                        AND (@ToDate IS NULL OR CAST(p.date AS DATE) <= CAST(@ToDate AS DATE))
@@ -128,10 +118,6 @@ namespace HoneyErpAPI.Repository
 
             foreach (DataRow row in dt.Rows)
             {
-                int? docId = (dt.Columns.Contains("docId") && !row.IsNull("docId")) ? Convert.ToInt32(row["docId"]) : (int?)null;
-                string? docEdid = docId.HasValue ? EncryptionHelper.Encrypt(docId.Value.ToString()) : null;
-                string? docOriginalName = (dt.Columns.Contains("documentOriginalName") && !row.IsNull("documentOriginalName")) ? row.Field<string>("documentOriginalName") : null;
-
                 res.Items.Add(new PurchaseListItem
                 {
                     Edid = EncryptionHelper.Encrypt(row.Field<int>("id").ToString()),
@@ -141,11 +127,6 @@ namespace HoneyErpAPI.Repository
                     PaidAmount = row.Field<decimal>("paidAmount"),
                     Balance = Convert.ToDecimal(row["balance"]),
                     Status = (Convert.ToDecimal(row["balance"]) <= 0 && row.Field<decimal>("totalAmount") > 0) ? "PAID" : row.Field<string>("status")!,
-                    AttachmentData = !string.IsNullOrWhiteSpace(docEdid) ? new DocumentModel
-                    {
-                        DocumentEdid = docEdid,
-                        DocumentOriginalName = docOriginalName
-                    } : null
                 });
             }
 
@@ -156,13 +137,12 @@ namespace HoneyErpAPI.Repository
         {
             SqlParameter[] p = { new SqlParameter("@Id", EncryptionHelper.Decrypt(edid)) };
 
-            string query = @"SELECT p.id, p.docId, p.supplierId, s.name AS supplierName, p.date,
+            string query = @"SELECT p.id, p.supplierId, s.name AS supplierName, p.date,
                             p.totalAmount, p.status, p.paidAmount,
                             (p.totalAmount - p.paidAmount) AS balance,
-                            a.originalName AS documentOriginalName
+                            CAST(NULL AS NVARCHAR(255)) AS documentOriginalName
                      FROM PurchaseMaster p
                      INNER JOIN SupplierMaster s ON p.supplierId = s.id
-                     LEFT JOIN AttachmentMaster a ON p.docId = a.id
                      WHERE p.id = @Id";
 
             DataTable dt = _client.ExecuteAdapter(query, p, CommandType.Text).Tables[0];
@@ -170,10 +150,6 @@ namespace HoneyErpAPI.Repository
             if (dt.Rows.Count == 0) return null;
 
             DataRow row = dt.Rows[0];
-            int? docId = (dt.Columns.Contains("docId") && !row.IsNull("docId")) ? Convert.ToInt32(row["docId"]) : (int?)null;
-            string? docEdid = docId.HasValue ? EncryptionHelper.Encrypt(docId.Value.ToString()) : null;
-            string? docOriginalName = (dt.Columns.Contains("documentOriginalName") && !row.IsNull("documentOriginalName")) ? row.Field<string>("documentOriginalName") : null;
-
             return new GetPurchaseByIdRes
             {
                 Edid = EncryptionHelper.Encrypt(row.Field<int>("id").ToString()),
@@ -185,44 +161,45 @@ namespace HoneyErpAPI.Repository
                 PaidAmount = row.Field<decimal>("paidAmount"),
                 Balance = Convert.ToDecimal(row["balance"]),
                 Status = (Convert.ToDecimal(row["balance"]) <= 0 && row.Field<decimal>("totalAmount") > 0) ? "PAID" : row.Field<string>("status")!,
-                AttachmentData = !string.IsNullOrWhiteSpace(docEdid) ? new DocumentModel
-                {
-                    DocumentEdid = docEdid,
-                    DocumentOriginalName = docOriginalName
-                } : null
             };
         }
 
         public CreatePurchaseRes Create(CreatePurchaseReq req)
         {
+            EnsurePurchasePaymentTable();
             string supplierId = EncryptionHelper.Decrypt(req.Purchase.SupplierEdid);
 
             req.Purchase.Balance = req.Purchase.TotalAmount - req.Purchase.PaidAmount;
+            string? initialPaymentEdid = null;
+            string? initialPaymentTransactionNumber = null;
 
-            int? docId = null;
-            string? docEdid = req.Purchase.AttachmentData?.DocumentEdid;
-            if (!string.IsNullOrWhiteSpace(docEdid))
-            {
-                string decrypted = EncryptionHelper.Decrypt(docEdid);
-                if (int.TryParse(decrypted, out int parsedId))
-                    docId = parsedId;
-                else if (int.TryParse(docEdid, out int rawId))
-                    docId = rawId;
-            }
-
-            SqlParameter[] p = new SqlParameter[6];
+            SqlParameter[] p = new SqlParameter[5];
             p[0] = new SqlParameter("@SupplierId", supplierId);
             p[1] = new SqlParameter("@TotalAmount", req.Purchase.TotalAmount);
             p[2] = new SqlParameter("@Status", req.Purchase.Status.ToString().ToUpper());
             p[3] = new SqlParameter("@Date", req.Purchase.Date);
             p[4] = new SqlParameter("@PaidAmount", req.Purchase.PaidAmount);
-            p[5] = new SqlParameter("@DocId", (object?)docId ?? DBNull.Value);
-
-            string query = @"INSERT INTO PurchaseMaster (supplierId,date,totalAmount,status,paidAmount,docId)
+            string query = @"INSERT INTO PurchaseMaster (supplierId,date,totalAmount,status,paidAmount)
                      OUTPUT INSERTED.Id
-                     VALUES (@SupplierId,@Date,@TotalAmount,@Status,@PaidAmount,@DocId)";
+                     VALUES (@SupplierId,@Date,@TotalAmount,@Status,@PaidAmount)";
 
             int purchaseId = _client.ExecuteScalar<int>(query, p, CommandType.Text);
+
+            if (req.Purchase.PaidAmount > 0)
+            {
+                initialPaymentTransactionNumber = Utilities.GeneratePublicId("TXN", 6);
+                int paymentId = InsertPaymentHistory(
+                    purchaseId,
+                    req.Purchase.PaidAmount,
+                    initialPaymentTransactionNumber,
+                    req.Purchase.InitialPaymentMethod ?? "Cash",
+                    req.Purchase.InitialPaymentType,
+                    OrderPaymentStatus.Success,
+                    req.Purchase.InitialPaymentReference,
+                    req.Purchase.InitialPaymentRemark,
+                    req.Purchase.Date);
+                initialPaymentEdid = EncryptionHelper.Encrypt(paymentId.ToString());
+            }
 
             if (req.Purchase.Balance > 0)
             {
@@ -298,7 +275,12 @@ namespace HoneyErpAPI.Repository
                     ip, CommandType.Text);
             }
 
-            return new CreatePurchaseRes { Edid = EncryptionHelper.Encrypt(purchaseId.ToString()) };
+            return new CreatePurchaseRes
+            {
+                Edid = EncryptionHelper.Encrypt(purchaseId.ToString()),
+                InitialPaymentEdid = initialPaymentEdid,
+                InitialPaymentTransactionNumber = initialPaymentTransactionNumber
+            };
         }
         public bool UpdateStatus(string edid, string status)
         {
@@ -308,21 +290,136 @@ namespace HoneyErpAPI.Repository
             return _client.ExecuteNonQuery("UPDATE PurchaseMaster SET status=@Status WHERE id=@Id", p, CommandType.Text) > 0;
         }
 
-        public bool RecordPayment(string purchaseEdid, string supplierEdid, decimal amount, string newStatus)
+        public List<PurchasePaymentItem> GetPayments(string purchaseEdid)
         {
+            EnsurePurchasePaymentTable();
+            int purchaseId = EncryptionHelper.Decrypt<int>(purchaseEdid);
+            SqlParameter[] p = { new SqlParameter("@PurchaseId", purchaseId) };
+            string query = @"SELECT id, transactionNumber, amount, paymentMethod, paymentType, status, paymentReference, remarks, paymentDate
+                             FROM PurchasePayment
+                             WHERE purchaseId = @PurchaseId
+                             ORDER BY paymentDate DESC, id DESC";
+
+            DataTable dt = _client.ExecuteAdapter(query, p, CommandType.Text).Tables[0];
+            List<PurchasePaymentItem> payments = new List<PurchasePaymentItem>();
+            foreach (DataRow row in dt.Rows)
+            {
+                payments.Add(new PurchasePaymentItem
+                {
+                    Edid = EncryptionHelper.Encrypt(row.Field<int>("id").ToString()),
+                    TransactionNumber = row.Field<string>("transactionNumber") ?? string.Empty,
+                    Amount = row.Field<decimal>("amount"),
+                    PaymentMethod = row.Field<string>("paymentMethod") ?? "Cash",
+                    PaymentType = Utilities.ParseEnum<OrderPaymentType>(row.Field<string>("paymentType")) ?? OrderPaymentType.Advance,
+                    Status = Utilities.ParseEnum<OrderPaymentStatus>(row.Field<string>("status")) ?? OrderPaymentStatus.Success,
+                    PaymentReference = row.Field<string?>("paymentReference"),
+                    Remarks = row.Field<string?>("remarks"),
+                    PaymentDate = row.Field<DateTime>("paymentDate")
+                });
+            }
+
+            return payments;
+        }
+
+        public int RecordPayment(string purchaseEdid, string supplierEdid, PayPurchaseDueReq req, string newStatus, decimal paidAmountDelta, string transactionNumber)
+        {
+            EnsurePurchasePaymentTable();
             string purchaseId = EncryptionHelper.Decrypt(purchaseEdid);
             string supplierId = EncryptionHelper.Decrypt(supplierEdid);
-
-            SqlParameter[] p = new SqlParameter[4];
+            DateTime paymentDate = req.PaymentDate ?? DateTime.UtcNow;
+            SqlParameter[] p = new SqlParameter[12];
             p[0] = new SqlParameter("@PurchaseId", purchaseId);
             p[1] = new SqlParameter("@SupplierId", supplierId);
-            p[2] = new SqlParameter("@Amount", amount);
+            p[2] = new SqlParameter("@Amount", req.Amount);
             p[3] = new SqlParameter("@Status", newStatus);
+            p[4] = new SqlParameter("@PaidAmountDelta", paidAmountDelta);
+            p[5] = new SqlParameter("@TransactionNumber", transactionNumber);
+            p[6] = new SqlParameter("@PaymentMethod", req.PaymentMethod.ToString());
+            p[7] = new SqlParameter("@PaymentType", req.PaymentType.ToString());
+            p[8] = new SqlParameter("@PaymentStatus", req.Status.ToString());
+            p[9] = new SqlParameter("@PaymentReference", Utilities.DbValue(req.PaymentReference));
+            p[10] = new SqlParameter("@Remarks", Utilities.DbValue(req.Remarks));
+            p[11] = new SqlParameter("@PaymentDate", paymentDate);
 
-            string query = @"UPDATE PurchaseMaster SET paidAmount = paidAmount + @Amount, status = @Status WHERE id = @PurchaseId;
-                            UPDATE SupplierMaster SET balance = ISNULL(balance, 0) - @Amount WHERE id = @SupplierId;";
+            string query = @"BEGIN TRY
+                                BEGIN TRANSACTION;
+                                UPDATE PurchaseMaster SET paidAmount = paidAmount + @PaidAmountDelta, status = @Status WHERE id = @PurchaseId;
+                                UPDATE SupplierMaster SET balance = ISNULL(balance, 0) - @PaidAmountDelta WHERE id = @SupplierId;
+                                INSERT INTO PurchasePayment (purchaseId, transactionNumber, amount, paymentMethod, paymentType, status, paymentReference, remarks, paymentDate)
+                                VALUES (@PurchaseId, @TransactionNumber, @Amount, @PaymentMethod, @PaymentType, @PaymentStatus, @PaymentReference, @Remarks, @PaymentDate);
+                                SELECT CAST(SCOPE_IDENTITY() AS INT);
+                                COMMIT TRANSACTION;
+                            END TRY
+                            BEGIN CATCH
+                                IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                                THROW;
+                            END CATCH;";
 
-            return _client.ExecuteNonQuery(query, p, CommandType.Text) > 0;
+            return _client.ExecuteScalar<int>(query, p, CommandType.Text);
+        }
+
+        private int InsertPaymentHistory(int purchaseId, decimal amount, string transactionNumber, string paymentMethod, OrderPaymentType paymentType, OrderPaymentStatus status, string? paymentReference, string? remarks, DateTime paymentDate)
+        {
+            SqlParameter[] p =
+            {
+                new SqlParameter("@PurchaseId", purchaseId),
+                new SqlParameter("@TransactionNumber", transactionNumber),
+                new SqlParameter("@Amount", amount),
+                new SqlParameter("@PaymentMethod", string.IsNullOrWhiteSpace(paymentMethod) ? "Cash" : paymentMethod),
+                new SqlParameter("@PaymentType", paymentType.ToString()),
+                new SqlParameter("@Status", status.ToString()),
+                new SqlParameter("@PaymentReference", Utilities.DbValue(paymentReference)),
+                new SqlParameter("@Remarks", Utilities.DbValue(remarks)),
+                new SqlParameter("@PaymentDate", paymentDate)
+            };
+
+            const string query = @"INSERT INTO PurchasePayment (purchaseId, transactionNumber, amount, paymentMethod, paymentType, status, paymentReference, remarks, paymentDate)
+                                   OUTPUT INSERTED.id
+                                   VALUES (@PurchaseId, @TransactionNumber, @Amount, @PaymentMethod, @PaymentType, @Status, @PaymentReference, @Remarks, @PaymentDate)";
+            return _client.ExecuteScalar<int>(query, p, CommandType.Text);
+        }
+
+        private void EnsurePurchasePaymentTable()
+        {
+            const string query = @"IF OBJECT_ID(N'dbo.PurchasePayment', N'U') IS NULL
+                                  BEGIN
+                                      CREATE TABLE dbo.PurchasePayment
+                                      (
+                                          id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                                          purchaseId INT NOT NULL,
+                                          transactionNumber NVARCHAR(50) NULL,
+                                          amount DECIMAL(18,2) NOT NULL,
+                                          paymentMethod NVARCHAR(50) NOT NULL CONSTRAINT DF_PurchasePayment_Method DEFAULT 'Cash',
+                                          paymentType NVARCHAR(30) NOT NULL CONSTRAINT DF_PurchasePayment_Type DEFAULT 'Advance',
+                                          status NVARCHAR(30) NOT NULL CONSTRAINT DF_PurchasePayment_Status DEFAULT 'Success',
+                                          paymentReference NVARCHAR(150) NULL,
+                                          remarks NVARCHAR(500) NULL,
+                                          paymentDate DATETIME2 NOT NULL CONSTRAINT DF_PurchasePayment_Date DEFAULT SYSUTCDATETIME()
+                                      );
+                                      CREATE INDEX IX_PurchasePayment_PurchaseId_PaymentDate
+                                          ON dbo.PurchasePayment (purchaseId, paymentDate DESC, id DESC);
+                                  END";
+            _client.ExecuteNonQuery(query, null, CommandType.Text);
+
+                const string ensureColumnsQuery = @"IF COL_LENGTH(N'dbo.PurchasePayment', N'transactionNumber') IS NULL
+                                                                  ALTER TABLE dbo.PurchasePayment ADD transactionNumber NVARCHAR(50) NULL;
+                                                              IF COL_LENGTH(N'dbo.PurchasePayment', N'paymentType') IS NULL
+                                                                  ALTER TABLE dbo.PurchasePayment ADD paymentType NVARCHAR(30) NOT NULL CONSTRAINT DF_PurchasePayment_Type_Migration DEFAULT 'Advance';
+                                                              IF COL_LENGTH(N'dbo.PurchasePayment', N'status') IS NULL
+                                                                  ALTER TABLE dbo.PurchasePayment ADD status NVARCHAR(30) NOT NULL CONSTRAINT DF_PurchasePayment_Status_Migration DEFAULT 'Success';
+                                                              UPDATE dbo.PurchasePayment
+                                                              SET transactionNumber = CONCAT('PUR-', id)
+                                                              WHERE transactionNumber IS NULL";
+                _client.ExecuteNonQuery(ensureColumnsQuery, null, CommandType.Text);
+
+                const string backfillQuery = @"INSERT INTO dbo.PurchasePayment (purchaseId, transactionNumber, amount, paymentMethod, paymentType, status, remarks, paymentDate)
+                                                        SELECT p.id, CONCAT('PUR-HIST-', p.id), p.paidAmount, 'Historical', 'Advance', 'Success', 'Imported from existing purchase paid amount', p.date
+                                          FROM dbo.PurchaseMaster p
+                                          WHERE p.paidAmount > 0
+                                            AND NOT EXISTS (
+                                                SELECT 1 FROM dbo.PurchasePayment pp WHERE pp.purchaseId = p.id
+                                            )";
+            _client.ExecuteNonQuery(backfillQuery, null, CommandType.Text);
         }
 
         // ── Purchase Items ────────────────────────────────────────────────────

@@ -1,4 +1,6 @@
 using HoneyErpAPI.Common;
+using AttachmentEnum;
+using System.Text.Json.Serialization;
 using static WebApplication1.Common.Models;
 
 namespace HoneyErpAPI.Models
@@ -70,8 +72,7 @@ namespace HoneyErpAPI.Models
         public string?  InitialPaymentMethod { get; set; }
         public string?  InitialPaymentReference { get; set; }
         public string?  InitialPaymentType { get; set; }
-        public string?  InitialPaymentDocEdid { get; set; }
-        public int?     InitialPaymentDocId { get; set; }
+        public List<OrderPaymentAttachmentReq>? InitialPaymentAttachmentData { get; set; }
     }
 
     public class CreateOrderLine
@@ -88,6 +89,8 @@ namespace HoneyErpAPI.Models
     {
         public string Edid { get; set; } = string.Empty;
         public string OrderNumber { get; set; } = string.Empty;
+        [JsonIgnore]
+        public string? InitialPaymentEdid { get; set; }
     }
 
     // ── Order Items ───────────────────────────────────────────────────────────
@@ -142,7 +145,7 @@ namespace HoneyErpAPI.Models
         public int?           CourierId     { get; set; }
         public PackageStatus? Status        { get; set; }
         public string?        Tracking      { get; set; }
-        public string?        SlipDocument  { get; set; }
+        public List<AttachmentModuleRes> AttachmentData { get; set; } = new();
         public string?        HandedOverBy  { get; set; }
         public DateTime?      HandedOverAt  { get; set; }
     }
@@ -255,7 +258,7 @@ namespace HoneyErpAPI.Models
         public int?           CourierId       { get; set; }
         public PackageStatus? Status          { get; set; }
         public string?        Tracking        { get; set; }
-        public string?        SlipDocument    { get; set; }
+        public List<AttachmentModuleRes> AttachmentData { get; set; } = new();
         public string?        HandedOverBy    { get; set; }
         public DateTime?      HandedOverAt    { get; set; }
     }
@@ -387,10 +390,16 @@ namespace HoneyErpAPI.Models
         public string?   Tracking       { get; set; }
         public string?   TrackingNumber { get; set; }
         public decimal?  TotalWeight    { get; set; }
-        public string?   SlipDocument   { get; set; }
-        public int?      ReceiptDocId   { get; set; }
+        public List<OrderHandoverAttachmentReq>? AttachmentData { get; set; }
         public string?   HandedOverBy   { get; set; }
         public DateTime? HandedOverAt   { get; set; }
         public decimal?  CourierCharge  { get; set; }
+    }
+
+    public class OrderHandoverAttachmentReq
+    {
+        public string? AttachmentEdid { get; set; }
+        public OrderHandoverAttachmentType AttachmentType { get; set; } = OrderHandoverAttachmentType.CourierSlip;
+        public string? Remarks { get; set; }
     }
 }

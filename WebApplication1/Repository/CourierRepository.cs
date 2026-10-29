@@ -2,20 +2,22 @@ using HoneyErpAPI.Common;
 using HoneyErpAPI.Models;
 using HoneyErpAPI.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Data.SqlClient;
 using System;
 using System.Collections.Generic;
 using System.Data;
+using static WebApplication1.Common.Models;
 
 namespace HoneyErpAPI.Repository
 {
     public interface ICourierRepository
     {
-        GetCourierListRes GetAll(GetCourierListReq req);
-        CourierListItem? GetById(int id);
+        PageResult<CourierListItem> GetAll(GetCourierListReq req);
+        CourierDetailsRes? GetById(int id, string courierName);
         List<CourierMetadataItem> GetMetadataByCourierId(int courierId);
-        string Create(AddCourierReq req, int currentUserId = 1);
-        bool Update(UpdateCourierReq req);
+        string Create(AddCourierReq req);
+        UpdateCourierRes Update(UpdateCourierReq req,string courierName);
     }
 
     public class CourierRepository : ICourierRepository
@@ -28,7 +30,7 @@ namespace HoneyErpAPI.Repository
             _currentUserService = currentUserService;
         }
 
-        public GetCourierListRes GetAll(GetCourierListReq req)
+        public PageResult<CourierListItem> GetAll(GetCourierListReq req)
         {
             int pageNumber = req.PaginationRequest?.PageNumber > 0 ? req.PaginationRequest.PageNumber : 1;
             int pageSize = req.PaginationRequest?.PageSize > 0 ? req.PaginationRequest.PageSize : 10;
@@ -36,167 +38,94 @@ namespace HoneyErpAPI.Repository
 
             SqlParameter[] p = new SqlParameter[4];
             p[0] = new SqlParameter("@OnlyActive", req.OnlyActive);
-            p[1] = new SqlParameter("@SearchText", Utilities.DbValue(req.SearchText));
+            p[1] = new SqlParameter("@SearchText", Utilities.DbValue(req.SearchText?.Trim()));
             p[2] = new SqlParameter("@Offset", offset);
             p[3] = new SqlParameter("@PageSize", pageSize);
 
-            string query = @"SELECT c.id, c.name, c.contactPerson, c.mobile, c.email, c.address, c.isActive, c.docId, a.originalName AS documentOriginalName
-             FROM CourierMaster c
-             LEFT JOIN AttachmentMaster a ON TRY_CAST(c.docId AS INT) = a.id
-             WHERE (@OnlyActive = 0 OR c.isActive = 1)
-             AND (@SearchText IS NULL OR c.name LIKE '%' + @SearchText + '%' OR c.contactPerson LIKE '%' + @SearchText + '%' OR c.mobile LIKE '%' + @SearchText + '%' OR c.email LIKE '%' + @SearchText + '%' OR c.address LIKE '%' + @SearchText + '%')
-             ORDER BY c.name ASC
-             OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
+            string query = @"SELECT c.id, c.name, c.contactPerson, c.mobile, c.isActive
+            FROM CourierMaster c WHERE (@OnlyActive = 0 OR c.isActive = 1)
+            AND (@SearchText IS NULL OR c.name LIKE '%' + @SearchText + '%' OR c.contactPerson LIKE '%' + @SearchText + '%' OR c.mobile LIKE '%' + @SearchText + '%')
+            ORDER BY c.name ASC OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
 
-            DataTable dt = _client.ExecuteAdapter(query, p, CommandType.Text).Tables[0];
-            GetCourierListRes res = new GetCourierListRes();
+            SELECT COUNT(*) AS TotalCount FROM CourierMaster
+            WHERE (@OnlyActive = 0 OR isActive = 1)
+            AND (@SearchText IS NULL OR name LIKE '%' + @SearchText + '%' OR contactPerson LIKE '%' + @SearchText + '%' OR mobile LIKE '%' + @SearchText + '%')";
 
-            SqlParameter[] countP = new SqlParameter[2];
-            countP[0] = new SqlParameter("@OnlyActive", req.OnlyActive);
-            countP[1] = new SqlParameter("@SearchText", Utilities.DbValue(req.SearchText));
+            DataSet ds = _client.ExecuteAdapter(query, p, CommandType.Text);
+            DataTable dt = ds.Tables[0];
+            DataTable countDt = ds.Tables[1];
 
-            string countQuery = @"SELECT COUNT(*)
-                  FROM CourierMaster
-                  WHERE (@OnlyActive = 0 OR isActive = 1)
-                  AND (@SearchText IS NULL OR name LIKE '%' + @SearchText + '%' OR contactPerson LIKE '%' + @SearchText + '%' OR mobile LIKE '%' + @SearchText + '%' OR email LIKE '%' + @SearchText + '%' OR address LIKE '%' + @SearchText + '%')";
+            PageResult<CourierListItem> res = new PageResult<CourierListItem>();
 
-            DataTable countDt = _client.ExecuteAdapter(countQuery, countP, CommandType.Text).Tables[0];
-            int totalCount = countDt.Rows[0].Field<int>(0);
+            int totalCount = countDt.Rows[0].Field<int>("TotalCount");
 
             res.TotalCount = totalCount;
             res.PageNumber = pageNumber;
             res.PageSize = pageSize;
 
-            SqlParameter[] metaP = new SqlParameter[4];
-            metaP[0] = new SqlParameter("@OnlyActive", req.OnlyActive);
-            metaP[1] = new SqlParameter("@SearchText", Utilities.DbValue(req.SearchText));
-            metaP[2] = new SqlParameter("@Offset", offset);
-            metaP[3] = new SqlParameter("@PageSize", pageSize);
-
-            string metaQuery = @"SELECT m.courierMasterId, m.label, m.value, m.showInSlip
-                 FROM CourierMetadata m
-                 INNER JOIN CourierMaster cm ON cm.id = m.courierMasterId
-                 WHERE cm.id IN (
-                     SELECT id
-                     FROM CourierMaster
-                     WHERE (@OnlyActive = 0 OR isActive = 1)
-                     AND (@SearchText IS NULL OR name LIKE '%' + @SearchText + '%' OR contactPerson LIKE '%' + @SearchText + '%' OR mobile LIKE '%' + @SearchText + '%' OR email LIKE '%' + @SearchText + '%' OR address LIKE '%' + @SearchText + '%')
-                     ORDER BY name ASC
-                     OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
-                 )
-                 ORDER BY cm.id ASC";
-
-            DataTable metaDt = _client.ExecuteAdapter(metaQuery, metaP, CommandType.Text).Tables[0];
-
-            Dictionary<int, List<CourierMetadataItem>> metaLookup = new Dictionary<int, List<CourierMetadataItem>>();
-
-            foreach (DataRow mRow in metaDt.Rows)
-            {
-                int cmId = mRow.Field<int>("courierMasterId");
-
-                if (!metaLookup.TryGetValue(cmId, out List<CourierMetadataItem>? mList))
-                {
-                    mList = new List<CourierMetadataItem>();
-                    metaLookup[cmId] = mList;
-                }
-
-                mList.Add(new CourierMetadataItem
-                {
-                    CourierMasterId = cmId,
-                    Label = mRow.Field<string>("label") ?? string.Empty,
-                    Value = mRow.Field<string>("value") ?? string.Empty,
-                    ShowInSlip = mRow.Field<bool>("showInSlip")
-                });
-            }
-
             foreach (DataRow row in dt.Rows)
             {
-                int id = row.Field<int>("id");
-                string? docId = row.Field<string?>("docId");
-                string? docEdid = null;
+                CourierListItem courierListItem = new CourierListItem();
+                courierListItem.Edid = EncryptionHelper.Encrypt(row.Field<int>("id").ToString());
+                courierListItem.Name = row.Field<string>("name") ?? string.Empty;
+                courierListItem.ContactPerson = row.Field<string?>("contactPerson");
+                courierListItem.Mobile = row.Field<string?>("mobile");
+                courierListItem.IsActive = row.Field<bool>("isActive");
 
-                if (!string.IsNullOrWhiteSpace(docId))
-                {
-                    docEdid = EncryptionHelper.Encrypt(docId);
-                }
-
-                string? docOriginalName = dt.Columns.Contains("documentOriginalName") && !row.IsNull("documentOriginalName")
-                    ? row.Field<string?>("documentOriginalName")
-                    : null;
-
-                metaLookup.TryGetValue(id, out List<CourierMetadataItem>? courierMeta);
-
-                res.Items.Add(new CourierListItem
-                {
-                    Id = id,
-                    Edid = EncryptionHelper.Encrypt(id.ToString()),
-                    Name = row.Field<string>("name") ?? string.Empty,
-                    ContactPerson = row.Field<string?>("contactPerson"),
-                    Mobile = row.Field<string?>("mobile"),
-                    Email = row.Field<string?>("email"),
-                    Address = row.Field<string?>("address"),
-                    IsActive = row.Field<bool>("isActive"),
-                    AttachmentData = !string.IsNullOrWhiteSpace(docEdid) ? new DocumentModel
-                    {
-                        DocumentEdid = docEdid,
-                        DocumentOriginalName = docOriginalName
-                    } : null,
-                    Metadata = courierMeta ?? new List<CourierMetadataItem>()
-                });
+                res.Items.Add(courierListItem);
             }
 
             return res;
         }
 
-        public CourierListItem? GetById(int id)
+        public CourierDetailsRes? GetById(int id, string courierName)
         {
-            SqlParameter[] p = { new SqlParameter("@Id", id) };
+            SqlParameter[] p = new SqlParameter[2];
+            p[0] = new SqlParameter("@Id", id);
+            p[1] = new SqlParameter("@Name", "%" + courierName.Trim() + "%");
 
-            string query = @"SELECT c.id, c.name, c.contactPerson, c.mobile, c.email, c.address, c.isActive, c.docId, a.originalName AS documentOriginalName
+            string query = @"SELECT c.id, c.name, c.contactPerson, c.mobile, c.email, c.address, c.isActive,
+                            cm.courierMasterId, cm.label, cm.value, cm.showInSlip
                      FROM CourierMaster c
-                     LEFT JOIN AttachmentMaster a ON TRY_CAST(c.docId AS INT) = a.id
-                     WHERE c.id = @Id";
+                     LEFT JOIN CourierMetadata cm ON cm.courierMasterId = c.id
+                     WHERE c.id = @Id AND c.name LIKE @Name";
 
             DataTable dt = _client.ExecuteAdapter(query, p, CommandType.Text).Tables[0];
             if (dt.Rows.Count == 0) return null;
 
             DataRow row = dt.Rows[0];
-            string? docId = row.Field<string?>("docId");
-            string? docEdid = null;
 
-            if (!string.IsNullOrWhiteSpace(docId))
+            CourierDetailsRes res = new CourierDetailsRes();
+            res.Edid = EncryptionHelper.Encrypt(id.ToString());
+            res.Name = row.Field<string>("name") ?? string.Empty;
+            res.ContactPerson = row.Field<string?>("contactPerson");
+            res.Mobile = row.Field<string?>("mobile");
+            res.Email = row.Field<string?>("email");
+            res.Address = row.Field<string?>("address");
+            res.IsActive = row.Field<bool>("isActive");
+            res.Metadata = new List<CourierMetadataItem>();
+
+            foreach (DataRow metadataRow in dt.Rows)
             {
-                docEdid = EncryptionHelper.Encrypt(docId);
+                if (metadataRow.IsNull("courierMasterId"))
+                    continue;
+
+                CourierMetadataItem item = new CourierMetadataItem();
+                item.CourierMasterId = metadataRow.Field<int>("courierMasterId");
+                item.Label = metadataRow.Field<string>("label") ?? string.Empty;
+                item.Value = metadataRow.Field<string>("value") ?? string.Empty;
+                item.ShowInSlip = metadataRow.Field<bool>("showInSlip");
+
+                res.Metadata.Add(item);
             }
 
-            string? docOriginalName = dt.Columns.Contains("documentOriginalName") && !row.IsNull("documentOriginalName")
-                ? row.Field<string?>("documentOriginalName")
-                : null;
-
-            List<CourierMetadataItem> metadata = GetMetadataByCourierId(id);
-
-            return new CourierListItem
-            {
-                Id = id,
-                Edid = EncryptionHelper.Encrypt(id.ToString()),
-                Name = row.Field<string>("name") ?? string.Empty,
-                ContactPerson = row.Field<string?>("contactPerson"),
-                Mobile = row.Field<string?>("mobile"),
-                Email = row.Field<string?>("email"),
-                Address = row.Field<string?>("address"),
-                IsActive = row.Field<bool>("isActive"),
-                AttachmentData = !string.IsNullOrWhiteSpace(docEdid) ? new DocumentModel
-                {
-                    DocumentEdid = docEdid,
-                    DocumentOriginalName = docOriginalName
-                } : null,
-                Metadata = metadata
-            };
+            return res;
         }
-        
+
         public List<CourierMetadataItem> GetMetadataByCourierId(int courierId)
         {
-            SqlParameter[] p = { new SqlParameter("@CourierId", courierId) };
+            SqlParameter[] p = new SqlParameter[1];
+            p[0] = new SqlParameter("@CourierId", courierId);
 
             string query = @"SELECT courierMasterId, label, value, showInSlip
                      FROM CourierMetadata
@@ -207,54 +136,48 @@ namespace HoneyErpAPI.Repository
 
             foreach (DataRow row in dt.Rows)
             {
-                list.Add(new CourierMetadataItem
-                {
-                    CourierMasterId = row.Field<int>("courierMasterId"),
-                    Label = row.Field<string>("label") ?? string.Empty,
-                    Value = row.Field<string>("value") ?? string.Empty,
-                    ShowInSlip = row.Field<bool>("showInSlip")
-                });
+                CourierMetadataItem item = new CourierMetadataItem();
+                item.CourierMasterId = row.Field<int>("courierMasterId");
+                item.Label = row.Field<string>("label") ?? string.Empty;
+                item.Value = row.Field<string>("value") ?? string.Empty;
+                item.ShowInSlip = row.Field<bool>("showInSlip");
+
+                list.Add(item);
             }
 
             return list;
         }
 
-        public string Create(AddCourierReq req, int currentUserId = 1)
+        public string Create(AddCourierReq req)
         {
-            string? inputEdid = req.AttachmentData?.DocumentEdid;
-            string? docIdValue = !string.IsNullOrWhiteSpace(inputEdid)
-                ? EncryptionHelper.Decrypt(inputEdid)
-                : null;
-
-            SqlParameter[] p = new SqlParameter[6];
+            SqlParameter[] p = new SqlParameter[5];
             p[0] = new SqlParameter("@Name", req.Name.Trim());
             p[1] = new SqlParameter("@ContactPerson", Utilities.DbValue(req.ContactPerson));
             p[2] = new SqlParameter("@Mobile", Utilities.DbValue(req.Mobile));
             p[3] = new SqlParameter("@Email", Utilities.DbValue(req.Email));
             p[4] = new SqlParameter("@Address", Utilities.DbValue(req.Address));
-            p[5] = new SqlParameter("@DocId", Utilities.DbValue(docIdValue));
 
-            string query = @"INSERT INTO CourierMaster (name, contactPerson, mobile, email, address, isActive, docId, createdAt) 
-                             OUTPUT INSERTED.id 
-                             VALUES (@Name, @ContactPerson, @Mobile, @Email, @Address, 1, @DocId, SYSUTCDATETIME())";
+            string query = @"INSERT INTO CourierMaster (name, contactPerson, mobile, email, address) OUTPUT INSERTED.id 
+                            VALUES (@Name, @ContactPerson, @Mobile, @Email, @Address)";
+
             int newId = _client.ExecuteScalar<int>(query, p, CommandType.Text);
 
             if (req.Metadata != null && req.Metadata.Count > 0)
             {
-                foreach (var meta in req.Metadata)
+                foreach (CourierMetadataItem meta in req.Metadata)
                 {
                     if (string.IsNullOrWhiteSpace(meta.Label) || string.IsNullOrWhiteSpace(meta.Value))
                         continue;
 
-                    SqlParameter[] mp = {
-                        new SqlParameter("@CourierMasterId", newId),
-                        new SqlParameter("@Label", meta.Label.Trim()),
-                        new SqlParameter("@Value", meta.Value.Trim()),
-                        new SqlParameter("@ShowInSlip", meta.ShowInSlip),
-                        new SqlParameter("@CreatedBy", _currentUserService.EmployeeCode)
-                    };
-                    string mQuery = @"INSERT INTO CourierMetadata (courierMasterId, label, value, showInSlip, createdAt, createdBy) 
-                                      VALUES (@CourierMasterId, @Label, @Value, @ShowInSlip, SYSUTCDATETIME(), @CreatedBy)";
+                    SqlParameter[] mp = new SqlParameter[5];
+                    mp[0] = new SqlParameter("@CourierMasterId", newId);
+                    mp[1] = new SqlParameter("@Label", meta.Label.Trim());
+                    mp[2] = new SqlParameter("@Value", meta.Value.Trim());
+                    mp[3] = new SqlParameter("@ShowInSlip", meta.ShowInSlip);
+                    mp[4] = new SqlParameter("@CreatedBy", _currentUserService.EmployeeCode);
+
+                    string mQuery = @"INSERT INTO CourierMetadata (courierMasterId, label, value, showInSlip, createdBy) 
+                              VALUES (@CourierMasterId, @Label, @Value, @ShowInSlip, @CreatedBy)";
 
                     _client.ExecuteNonQuery(mQuery, mp, CommandType.Text);
                 }
@@ -263,14 +186,9 @@ namespace HoneyErpAPI.Repository
             return EncryptionHelper.Encrypt(newId.ToString());
         }
 
-        public bool Update(UpdateCourierReq req)
+        public UpdateCourierRes Update(UpdateCourierReq req, string courierName)
         {
             int courierId = EncryptionHelper.Decrypt<int>(req.Edid);
-
-            string? updateInputEdid = req.AttachmentData?.DocumentEdid;
-            string? updateDocIdValue = !string.IsNullOrWhiteSpace(updateInputEdid)
-                ? EncryptionHelper.Decrypt(updateInputEdid)
-                : null;
 
             SqlParameter[] p = new SqlParameter[8];
             p[0] = new SqlParameter("@Id", courierId);
@@ -279,22 +197,30 @@ namespace HoneyErpAPI.Repository
             p[3] = new SqlParameter("@Mobile", Utilities.DbValue(req.Mobile));
             p[4] = new SqlParameter("@Email", Utilities.DbValue(req.Email));
             p[5] = new SqlParameter("@Address", Utilities.DbValue(req.Address));
-            p[6] = new SqlParameter("@DocId", Utilities.DbValue(updateDocIdValue));
-            p[7] = new SqlParameter("@IsActive", Utilities.DbValue<bool>(req.IsActive));
+            p[6] = new SqlParameter("@IsActive", req.IsActive);
+            p[7] = new SqlParameter("@CourierName", courierName.Trim());
 
-            string updateQuery = @"UPDATE CourierMaster  SET name = @Name, contactPerson = @ContactPerson,  mobile = @Mobile, email = @Email, 
-                                   address = @Address, docId = @DocId,isActive = ISNULL(@IsActive, isActive) WHERE id = @Id";
-            
-            _client.ExecuteNonQuery(updateQuery, p, CommandType.Text);
+            string updateQuery = @"UPDATE CourierMaster SET name = @Name, contactPerson = @ContactPerson, mobile = @Mobile, email = @Email, 
+                   address = @Address, isActive = @IsActive WHERE id = @Id AND name = @CourierName";
+
+            int rowsAffected = _client.ExecuteNonQuery(updateQuery, p, CommandType.Text);
+
+            if (rowsAffected == 0)
+            {
+                return new UpdateCourierRes { Success = false };
+            }
 
             if (req.Metadata != null)
             {
-                SqlParameter[] dp = { new SqlParameter("@CourierMasterId", courierId) };
+                SqlParameter[] dp = new SqlParameter[1];
+                dp[0] = new SqlParameter("@CourierMasterId", courierId);
+
                 _client.ExecuteNonQuery("DELETE FROM CourierMetadata WHERE courierMasterId = @CourierMasterId", dp, CommandType.Text);
 
-                foreach (var meta in req.Metadata)
+                foreach (CourierMetadataItem meta in req.Metadata)
                 {
-                    if (string.IsNullOrWhiteSpace(meta.Label) || string.IsNullOrWhiteSpace(meta.Value)) continue;
+                    if (string.IsNullOrWhiteSpace(meta.Label) || string.IsNullOrWhiteSpace(meta.Value))
+                        continue;
 
                     SqlParameter[] mp = new SqlParameter[6];
                     mp[0] = new SqlParameter("@CourierMasterId", courierId);
@@ -305,12 +231,16 @@ namespace HoneyErpAPI.Repository
                     mp[5] = new SqlParameter("@UpdatedBy", _currentUserService.EmployeeCode);
 
                     string mQuery = @"INSERT INTO CourierMetadata (courierMasterId, label, value, showInSlip, createdAt, createdBy, updatedAt, updatedBy) 
-                                      VALUES (@CourierMasterId, @Label, @Value, @ShowInSlip, SYSUTCDATETIME(), @CreatedBy, SYSUTCDATETIME(), @UpdatedBy)";
+                      VALUES (@CourierMasterId, @Label, @Value, @ShowInSlip, SYSUTCDATETIME(), @CreatedBy, SYSUTCDATETIME(), @UpdatedBy)";
+
                     _client.ExecuteNonQuery(mQuery, mp, CommandType.Text);
                 }
             }
 
-            return true;
+            UpdateCourierRes res = new UpdateCourierRes();
+            res.Success = true;
+
+            return res;
         }
     }
 }

@@ -152,8 +152,7 @@ namespace HoneyErpAPI.Models
     {
         public string InvoiceNumber { get; set; } = string.Empty;
         public string PurchaseEdid { get; set; } = string.Empty;
-        public int? DocId { get; set; }
-        public string? DocEdid { get; set; }
+        public List<AttachmentModuleRes> AttachmentData { get; set; } = new();
         public string SupplierName { get; set; } = string.Empty;
         public string BatchNumber { get; set; } = string.Empty;
         public decimal Quantity { get; set; }

@@ -2,10 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using HoneyErpAPI.Common;
+using AttachmentEnum;
 using static WebApplication1.Common.Models;
 
 namespace HoneyErpAPI.Models
 {
+    public class OrderPaymentAttachmentReq
+    {
+        public string? AttachmentEdid { get; set; }
+        public OrderPaymentAttachmentType AttachmentType { get; set; } = OrderPaymentAttachmentType.Receipt;
+        public string? Remarks { get; set; }
+    }
+
     public class OrderPaymentItem
     {
         public string Edid { get; set; } = string.Empty;
@@ -19,8 +27,7 @@ namespace HoneyErpAPI.Models
         public string? PaymentReference { get; set; }
         public DateTime? PaymentDate { get; set; }
         public string? Remark { get; set; }
-        public int? DocId { get; set; }
-        public string? DocEdid { get; set; }
+        public List<AttachmentModuleRes> AttachmentData { get; set; } = new();
         public DateTime CreatedAt { get; set; }
     }
 
@@ -34,8 +41,7 @@ namespace HoneyErpAPI.Models
         public string? PaymentReference { get; set; }
         public DateTime? PaymentDate { get; set; }
         public string? Remark { get; set; }
-        public int? DocId { get; set; }
-        public string? DocEdid { get; set; }
+        public List<OrderPaymentAttachmentReq>? AttachmentData { get; set; }
         public bool SyncToLedger { get; set; } = true;
     }
 
@@ -51,6 +57,7 @@ namespace HoneyErpAPI.Models
         public decimal AmountPaid { get; set; }
         public decimal BalanceAmount { get; set; }
         public string PaymentStatus { get; set; } = string.Empty;
+        public List<AttachmentModuleRes> AttachmentData { get; set; } = new();
     }
 
     public class GetOrderPaymentsRes : BaseApiResponse
@@ -104,8 +111,6 @@ namespace HoneyErpAPI.Models
         public string? PaymentReference { get; set; }
         public DateTime? PaymentDate { get; set; }
         public string? Remark { get; set; }
-        public int? DocId { get; set; }
-        public string? DocEdid { get; set; }
         public DateTime CreatedAt { get; set; }
     }
 }

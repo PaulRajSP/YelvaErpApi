@@ -1,6 +1,7 @@
 using HoneyErpAPI.Common;
 using HoneyErpAPI.Models;
 using HoneyErpAPI.Repository;
+using AttachmentEnum;
 using static WebApplication1.Common.Models;
 
 namespace HoneyErpAPI.Services
@@ -8,7 +9,13 @@ namespace HoneyErpAPI.Services
     public class RawMaterialService
     {
         private readonly IRawMaterialRepository _repo;
-        public RawMaterialService(IRawMaterialRepository repo) => _repo = repo;
+        private readonly CommonService _commonService;
+
+        public RawMaterialService(IRawMaterialRepository repo, CommonService commonService)
+        {
+            _repo = repo;
+            _commonService = commonService;
+        }
 
         public PageResult<RawMaterialListItem> GetAll(GetRawMaterialListReq req) => _repo.GetAll(req);
 
@@ -59,7 +66,13 @@ namespace HoneyErpAPI.Services
             return _repo.CreateCategory(req);
         }
 
-        public PageResult<MaterialPurchaseHistoryItem> GetPurchaseHistory(string edid, GetMaterialPurchaseHistoryReq req) => _repo.GetPurchaseHistory(edid, req);
+        public PageResult<MaterialPurchaseHistoryItem> GetPurchaseHistory(string edid, GetMaterialPurchaseHistoryReq req)
+        {
+            PageResult<MaterialPurchaseHistoryItem> result = _repo.GetPurchaseHistory(edid, req);
+            foreach (MaterialPurchaseHistoryItem item in result.Items)
+                item.AttachmentData = _commonService.GetModuleAttachments(AttachmentModule.Purchase, item.PurchaseEdid);
+            return result;
+        }
 
         public MaterialUsageHistoryRes GetUsageHistory(GetMaterialUsageHistoryReq req) => _repo.GetUsageHistory(req);
 
