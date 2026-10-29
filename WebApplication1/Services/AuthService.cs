@@ -53,7 +53,7 @@ namespace HoneyErpAPI.Services
             if (roles.Count == 0)
             {
                 // Fallback default role
-                roles.Add(RoleEnum.Staff.ToString());
+                roles.Add(Common.Enum.Staff.ToString());
             }
 
             List<string> permissions = _repo.GetPermissionsForRoles(roles);

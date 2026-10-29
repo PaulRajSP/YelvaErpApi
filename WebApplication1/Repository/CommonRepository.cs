@@ -3,6 +3,7 @@ using HoneyErpAPI.Models;
 using HoneyErpAPI.Services;
 using Microsoft.Data.SqlClient;
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using WebApplication1.Common;
@@ -16,14 +17,17 @@ namespace HoneyErpAPI.Repository
         int InsertAttachment(AttachmentModel model);
         AttachmentModel? GetAttachment(string edid, string fileName);
         bool AddModuleAttachment(List<AttachmentModuleReq> req);
+        List<AttachmentModel> GetModuleAttachments(string moduleName, string recordEdid);
+        bool DeactivateModuleAttachment(int moduleAttachmentId);
+        bool DeactivateModuleAttachments(string moduleName, int recordId, string? attachmentType = null);
     }
 
     public class CommonRepository : ICommonRepository
     {
         private readonly DbClient _client;
-        private readonly CurrentUserService _currentUserService;
+        private readonly ICurrentUserService _currentUserService;
 
-        public CommonRepository(DbClient client, CurrentUserService currentUserService)
+        public CommonRepository(DbClient client, ICurrentUserService currentUserService)
         {
             _client = client;
             _currentUserService = currentUserService;
@@ -31,7 +35,7 @@ namespace HoneyErpAPI.Repository
 
         public EnumListResponse GetEnumValues(string typeName)
         {
-            var res = new EnumListResponse();
+            EnumListResponse res = new EnumListResponse();
 
             switch (typeName)
             {
@@ -153,7 +157,7 @@ namespace HoneyErpAPI.Repository
                 parameters.Add(new SqlParameter("@CreatedBy" + i, _currentUserService.EmployeeCode));
 
                 values.Add("(@ModuleName" + i + ", @RecordId" + i + ", @AttachmentType" + i + ", @AttachmentId" + i + ", @Remarks" + i + ", @CreatedBy" + i + ")");
-            }
+        }
 
             string query = @"INSERT INTO ModuleAttachment(ModuleName, RecordId, AttachmentType, AttachmentId, Remarks, CreatedBy)
                              VALUES " + string.Join(", ", values);
