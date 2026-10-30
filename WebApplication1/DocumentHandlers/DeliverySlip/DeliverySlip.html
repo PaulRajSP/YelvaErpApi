@@ -773,7 +773,7 @@
                     {{CourierDetailsHtml}}
                 </div>
                 <div class="order-barcode-cell">
-                    <img src="https://barcode.tec-it.com/barcode.ashx?data={{ContractId}}&amp;code=Code128&amp;dpi=300&amp;translate-esc=on&amp;showhrt=false"
+                    <img src="https://barcode.tec-it.com/barcode.ashx?data={{OrderNumber}}&amp;code=Code128&amp;dpi=300&amp;translate-esc=on&amp;showhrt=false"
                          alt="Barcode" style="display: block; width: 200px; height: 35px; object-fit: fill;" />
                 </div>
             </div>
@@ -862,7 +862,6 @@
                                                 <!-- CHECKBOX FOR COMBO ITEMS -->
                                                 <div class="chk-container">
                                                     <span style="font-weight:800;">{{ cItem.TotalQuantity }}</span>
-                                                    <div class="chk-box-small"></div>
                                                 </div>
                                             </td>
                                         </tr>
@@ -877,7 +876,6 @@
                             <!-- CHECKBOX FOR MAIN ITEMS -->
                             <div class="chk-container">
                                 <span>{{ item.Quantity }}</span>
-                                <div class="chk-box"></div>
                             </div>
                         </td>
                     </tr>

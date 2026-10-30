@@ -304,7 +304,7 @@ namespace HoneyErpAPI.DocumentHandlers.DeliverySlip
                                         ? $"{pkg.Length:0.#} x {pkg.Width:0.#} x {pkg.Height:0.#} cm"
                                         : $"L: _______ x W: _______ x H: _______ cm",
 
-                PackageWeight = pkg != null && (pkg.Weight ?? 0) > 0 ? $"{pkg.Weight:0.00} kg" : "0.50 kg",
+                PackageWeight = pkg != null && (pkg.Weight ?? 0) > 0 ? $"{pkg.Weight:0.00} kg" : "_______ kg",
                 TotalQuantity = order.Items.Sum(i => i.Quantity).ToString(),
                 ContractInfoHtml = contractInfoHtml,
                 ContractId = barcodeData,
