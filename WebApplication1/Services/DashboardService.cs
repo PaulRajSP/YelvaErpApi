@@ -21,5 +21,10 @@ namespace HoneyErpAPI.Services
         {
             return _repo.GetSalesReport(period, dateString, timezoneOffsetMinutes);
         }
+
+        public TopSellingProductsRes GetTopSellingProducts(string? period, string? dateString, int? timezoneOffsetMinutes)
+        {
+            return _repo.GetTopSellingProducts(period, dateString, timezoneOffsetMinutes);
+        }
     }
 }

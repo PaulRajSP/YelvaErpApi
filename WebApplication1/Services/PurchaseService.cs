@@ -12,13 +12,14 @@ namespace HoneyErpAPI.Services
         private readonly PaymentTransactionService _paymentService;
         private readonly RawMaterialService _rawMaterialService;
         private readonly CommonService _commonService;
-
-        public PurchaseService(IPurchaseRepository repo, PaymentTransactionService paymentService, RawMaterialService rawMaterialService, CommonService commonService)
+        private readonly BatchService _batchService;
+        public PurchaseService(IPurchaseRepository repo, PaymentTransactionService paymentService, RawMaterialService rawMaterialService, CommonService commonService,BatchService batchService)
         {
             _repo = repo;
             _paymentService = paymentService;
             _rawMaterialService = rawMaterialService;
             _commonService = commonService;
+            _batchService= batchService;
         }
 
         public PageResult<PurchaseListItem> GetAll(GetPurchaseListReq req)
@@ -131,13 +132,43 @@ namespace HoneyErpAPI.Services
             req.Purchase.Balance = req.Purchase.TotalAmount - req.Purchase.PaidAmount;
             if (req.Purchase.PaidAmount > 0)
                 req.Purchase.InitialPaymentType = req.Purchase.PaidAmount >= req.Purchase.TotalAmount ? OrderPaymentType.FullPayment : OrderPaymentType.Advance;
+
+            for (int i = 0; i < req.Items.Count; i++)
+            {
+                CreatePurchaseItemLine item = req.Items[i];
+
+                if (string.IsNullOrEmpty(item.BatchEdid))
+                {
+                    CreateBatchReq newBatchReq = new CreateBatchReq();
+                    newBatchReq.MaterialEdid = item.MaterialEdid;
+                    newBatchReq.SupplierEdid = req.Purchase.SupplierEdid;
+                    newBatchReq.QtyPurchased = item.Qty;
+                    newBatchReq.QtyRemaining = item.Qty;
+                    newBatchReq.UnitCost = item.Rate;
+
+                    CreateBatchRes batchRes = _batchService.CreateBatch(newBatchReq);
+                    item.BatchEdid = batchRes.BatchEdid;
+                }
+                else
+                {
+                    GetBatchByIdRes batch = _batchService.GetBatchById(item.BatchEdid);
+                    if (EncryptionHelper.Decrypt(batch.MaterialEdid) != EncryptionHelper.Decrypt(item.MaterialEdid)
+                        || EncryptionHelper.Decrypt(batch.SupplierEdid ?? string.Empty) != EncryptionHelper.Decrypt(req.Purchase.SupplierEdid)
+                        || batch.UnitCost != item.Rate)
+                        throw new HoneyErpException(ErrorCode.InvalidData, "Selected batch must match the material, supplier, and unit cost.");
+                }
+            }
+
             req.Purchase.PublicId = Utilities.GeneratePublicId("PUR", 4);
 
             CreatePurchaseRes result = _repo.Create(req);
+
             if (req.Purchase.AttachmentData != null)
                 _commonService.SetModuleAttachments(req.Purchase.AttachmentData, AttachmentModule.Purchase, result.Edid);
+
             if (req.Purchase.InitialPaymentAttachmentData != null && !string.IsNullOrWhiteSpace(result.InitialPaymentEdid))
                 _commonService.SetModuleAttachments(req.Purchase.InitialPaymentAttachmentData, AttachmentModule.PurchasePayment, result.InitialPaymentEdid);
+
 
             if (req.Purchase.PaidAmount > 0)
             {

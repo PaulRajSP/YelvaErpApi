@@ -150,7 +150,7 @@ namespace HoneyErpAPI.Models
 
     public class MaterialPurchaseHistoryItem
     {
-        public string InvoiceNumber { get; set; } = string.Empty;
+        public string PurchaseNumber { get; set; } = string.Empty;
         public string PurchaseEdid { get; set; } = string.Empty;
         public List<AttachmentModuleRes> AttachmentData { get; set; } = new();
         public string SupplierName { get; set; } = string.Empty;
@@ -182,4 +182,3 @@ namespace HoneyErpAPI.Models
         public DateTime UsageDate { get; set; }
     }
 }
-

@@ -31,7 +31,8 @@ namespace HoneyErpAPI.Repository
             int pageSize = req.Pagination.PageSize > 0 ? req.Pagination.PageSize : 10;
             int offset = (pageNumber - 1) * pageSize;
 
-            string query = @"SELECT COUNT(*) OVER() AS TotalRecords, p.id, p.supplierId,
+            string query = @"SELECT COUNT(*) OVER() AS TotalRecords, p.id, p.publicNumber,
+                            p.supplierId,
                             s.name AS supplierName, p.date, p.totalAmount, p.status,
                             p.paidAmount, (p.totalAmount - p.paidAmount) AS balance,
                             CAST(NULL AS NVARCHAR(255)) AS documentOriginalName
@@ -40,17 +41,19 @@ namespace HoneyErpAPI.Repository
                      WHERE (@Status IS NULL OR p.status = @Status)
                        AND (@FromDate IS NULL OR CAST(p.date AS DATE) >= CAST(@FromDate AS DATE))
                        AND (@ToDate IS NULL OR CAST(p.date AS DATE) <= CAST(@ToDate AS DATE))
+                       AND (@PublicId IS NULL OR p.publicNumber LIKE '%' + @PublicId + '%')
                        AND (@SearchKeyword IS NULL OR s.name LIKE '%' + @SearchKeyword + '%' OR s.mobile = @SearchKeyword)
                      ORDER BY p.id DESC
                      OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
 
-            SqlParameter[] p = new SqlParameter[6];
+            SqlParameter[] p = new SqlParameter[7];
             p[0] = new SqlParameter("@Offset", offset);
             p[1] = new SqlParameter("@PageSize", pageSize);
             p[2] = new SqlParameter("@Status", Utilities.DbValue(req.Status));
             p[3] = new SqlParameter("@FromDate", Utilities.DbValue(req.FromDate));
             p[4] = new SqlParameter("@ToDate", Utilities.DbValue(req.ToDate));
             p[5] = new SqlParameter("@SearchKeyword", Utilities.DbValue(req.SearchKeyword));
+            p[6] = new SqlParameter("@PublicId", Utilities.DbValue(req.PublicId));
 
             DataTable dt = _client.ExecuteAdapter(query, p, CommandType.Text).Tables[0];
 
@@ -66,7 +69,7 @@ namespace HoneyErpAPI.Repository
                 res.Items.Add(new PurchaseListItem
                 {
                     Edid = EncryptionHelper.Encrypt(row.Field<int>("id").ToString()),
-                    PublicId = row.Field<int>("id").ToString(),
+                    PublicId = row.Field<string>("publicNumber") ?? string.Empty,
                     SupplierEdid = EncryptionHelper.Encrypt(row.Field<int>("supplierId").ToString()),
                     SupplierName = row.Field<string>("supplierName") ?? string.Empty,
                     Date = row.Field<DateTime>("date"),
@@ -86,7 +89,8 @@ namespace HoneyErpAPI.Repository
             int pageSize = req.PageSize > 0 ? req.PageSize : 10;
             int offset = (pageNumber - 1) * pageSize;
 
-            string query = @"SELECT COUNT(*) OVER() AS TotalRecords, p.id, p.supplierId, s.name AS supplierName,
+            string query = @"SELECT COUNT(*) OVER() AS TotalRecords, p.id, p.publicNumber,
+                            p.supplierId, s.name AS supplierName,
                             p.date, p.totalAmount, p.status, p.paidAmount,
                             (p.totalAmount - p.paidAmount) AS balance,
                             CAST(NULL AS NVARCHAR(255)) AS documentOriginalName
@@ -121,7 +125,7 @@ namespace HoneyErpAPI.Repository
                 res.Items.Add(new PurchaseListItem
                 {
                     Edid = EncryptionHelper.Encrypt(row.Field<int>("id").ToString()),
-                    PublicId = row.Field<int>("id").ToString(),
+                    PublicId = row.Field<string>("publicNumber") ?? string.Empty,
                     Date = row.Field<DateTime>("date"),
                     TotalAmount = row.Field<decimal>("totalAmount"),
                     PaidAmount = row.Field<decimal>("paidAmount"),
@@ -137,7 +141,8 @@ namespace HoneyErpAPI.Repository
         {
             SqlParameter[] p = { new SqlParameter("@Id", EncryptionHelper.Decrypt(edid)) };
 
-            string query = @"SELECT p.id, p.supplierId, s.name AS supplierName, p.date,
+            string query = @"SELECT p.id, p.publicNumber,
+                            p.supplierId, s.name AS supplierName, p.date,
                             p.totalAmount, p.status, p.paidAmount,
                             (p.totalAmount - p.paidAmount) AS balance,
                             CAST(NULL AS NVARCHAR(255)) AS documentOriginalName
@@ -153,7 +158,7 @@ namespace HoneyErpAPI.Repository
             return new GetPurchaseByIdRes
             {
                 Edid = EncryptionHelper.Encrypt(row.Field<int>("id").ToString()),
-                PublicId = row.Field<int>("id").ToString(),
+                PublicId = row.Field<string>("publicNumber") ?? string.Empty,
                 SupplierEdid = EncryptionHelper.Encrypt(row.Field<int>("supplierId").ToString()),
                 SupplierName = row.Field<string>("supplierName") ?? "",
                 Date = row.Field<DateTime>("date"),
@@ -173,15 +178,16 @@ namespace HoneyErpAPI.Repository
             string? initialPaymentEdid = null;
             string? initialPaymentTransactionNumber = null;
 
-            SqlParameter[] p = new SqlParameter[5];
+            SqlParameter[] p = new SqlParameter[6];
             p[0] = new SqlParameter("@SupplierId", supplierId);
             p[1] = new SqlParameter("@TotalAmount", req.Purchase.TotalAmount);
             p[2] = new SqlParameter("@Status", req.Purchase.Status.ToString().ToUpper());
             p[3] = new SqlParameter("@Date", req.Purchase.Date);
             p[4] = new SqlParameter("@PaidAmount", req.Purchase.PaidAmount);
-            string query = @"INSERT INTO PurchaseMaster (supplierId,date,totalAmount,status,paidAmount)
+            p[5] = new SqlParameter("@PublicNumber", Utilities.GeneratePublicId("PUR",4));
+            string query = @"INSERT INTO PurchaseMaster (supplierId,date,totalAmount,status,paidAmount,publicNumber)
                      OUTPUT INSERTED.Id
-                     VALUES (@SupplierId,@Date,@TotalAmount,@Status,@PaidAmount)";
+                     VALUES (@SupplierId,@Date,@TotalAmount,@Status,@PaidAmount,@PublicNumber)";
 
             int purchaseId = _client.ExecuteScalar<int>(query, p, CommandType.Text);
 

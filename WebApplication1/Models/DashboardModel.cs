@@ -49,6 +49,20 @@ namespace HoneyErpAPI.Models
         public List<PackingHistoryItem> PackingHistory { get; set; } = new List<PackingHistoryItem>();
     }
 
+    public class TopSellingProductsRes : BaseApiResponse
+    {
+        public string Period { get; set; } = "today";
+        public List<TopSellingProductItem> Items { get; set; } = new List<TopSellingProductItem>();
+    }
+
+    public class TopSellingProductItem
+    {
+        public int ProductId { get; set; }
+        public string ProductName { get; set; } = string.Empty;
+        public int QtySold { get; set; }
+        public decimal Revenue { get; set; }
+    }
+
     public class ProductSalesPerformanceItem
     {
         public int ProductId { get; set; }
