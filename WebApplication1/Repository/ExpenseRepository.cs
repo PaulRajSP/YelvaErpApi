@@ -105,7 +105,7 @@ namespace HoneyErpAPI.Repository
 
         public string Create(CreateExpenseReq req)
         {
-            string expenseNumber = $"EXP-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
+            string expenseNumber = Utilities.GeneratePublicId("EXP", 5); //$"EXP-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}";
             DateTime expenseDate = req.ExpenseDate ?? DateTime.UtcNow;
             bool isPaid = string.Equals(req.Status, "Paid", StringComparison.OrdinalIgnoreCase);
 
