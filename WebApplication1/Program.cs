@@ -144,6 +144,7 @@ builder.Services.AddScoped<DbClient>();
 builder.Services.AddScoped<IUnitRepository,        UnitRepository>();
 builder.Services.AddScoped<IProductRepository,     ProductRepository>();
 builder.Services.AddScoped<IRawMaterialRepository, RawMaterialRepository>();
+builder.Services.AddScoped<IMaterialBatchUsageRepository, MaterialBatchUsageRepository>();
 builder.Services.AddScoped<IcustomerRepository,    customerRepository>();
 builder.Services.AddScoped<IOrderRepository,       OrderRepository>();
 builder.Services.AddScoped<ISupplierRepository,    SupplierRepository>();
@@ -165,6 +166,7 @@ builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<UnitService>();
 builder.Services.AddScoped<ProductService>();
 builder.Services.AddScoped<RawMaterialService>();
+builder.Services.AddScoped<MaterialBatchUsageService>();
 builder.Services.AddScoped<customerService>();
 builder.Services.AddScoped<OrderService>();
 builder.Services.AddScoped<SupplierService>();
@@ -241,4 +243,3 @@ app.MapControllers();
 #endregion
 
 app.Run();
-

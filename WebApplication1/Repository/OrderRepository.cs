@@ -38,11 +38,19 @@ namespace HoneyErpAPI.Repository
     {
         private readonly DbClient _client;
         private readonly CurrentUserService _currentUserService;
+        private readonly IMaterialBatchUsageRepository _materialBatchUsageRepository;
+        private readonly IProductRepository _productRepository;
 
-        public OrderRepository(DbClient client, CurrentUserService currentUserService)
+        public OrderRepository(
+            DbClient client,
+            CurrentUserService currentUserService,
+            IMaterialBatchUsageRepository materialBatchUsageRepository,
+            IProductRepository productRepository)
         {
             _client = client;
             _currentUserService = currentUserService;
+            _materialBatchUsageRepository = materialBatchUsageRepository;
+            _productRepository = productRepository;
         }
 
 
@@ -320,6 +328,7 @@ namespace HoneyErpAPI.Repository
                 throw new HoneyErpException(ErrorCode.NotFound, "Order not found");
 
             string currentStatus = dtOrder.Rows[0].Field<string>("status") ?? "";
+            string orderNumber = dtOrder.Rows[0].Field<string>("orderNumber") ?? orderId.ToString();
 
             if (status == OrderStatus.Cancelled)
             {
@@ -347,29 +356,33 @@ namespace HoneyErpAPI.Repository
                 // 1. Restore product stock in ProductBatchMaster for any packed / batch-assigned bottles
                 SqlParameter[] assignedP = { new SqlParameter("@OrderId", orderId) };
                 string assignedSql = @"
-                    SELECT opi.productBatchId, COUNT(1) AS qty
+                    SELECT opi.productBatchId, pb.productId, COUNT(1) AS qty
                     FROM OrderProductItem opi
                     INNER JOIN OrderProductMaster opm ON opi.orderProductMstId = opm.id
+                    INNER JOIN ProductBatchMaster pb ON pb.id = opi.productBatchId
                     WHERE opm.orderId = @OrderId 
                       AND opi.productBatchId IS NOT NULL 
                       AND opi.status != 'Cancelled'
-                    GROUP BY opi.productBatchId";
+                    GROUP BY opi.productBatchId, pb.productId";
                 DataTable assignedDt = _client.ExecuteAdapter(assignedSql, assignedP, CommandType.Text).Tables[0];
 
                 foreach (DataRow r in assignedDt.Rows)
                 {
                     int batchId = r.Field<int>("productBatchId");
+                    int productId = r.Field<int>("productId");
                     int qty = r.Field<int>("qty");
                     if (qty > 0)
                     {
-                        SqlParameter[] resP = {
-                            new SqlParameter("@BatchId", batchId),
-                            new SqlParameter("@Qty", (decimal)qty)
-                        };
-                        string restoreBatchSql = @"UPDATE ProductBatchMaster 
-                                                   SET remainingQty = remainingQty + @Qty 
-                                                   WHERE id = @BatchId";
-                        _client.ExecuteNonQuery(restoreBatchSql, resP, CommandType.Text);
+                        bool restored = _productRepository.AddProductBatchUsage(new ProductBatchUsage
+                        {
+                            ProductBatchEdid = EncryptionHelper.Encrypt(batchId.ToString()),
+                            ProductEdid = EncryptionHelper.Encrypt(productId.ToString()),
+                            QuantityUsed = qty,
+                            EntryType = MaterialBatchEntryType.In,
+                            Remark = $"Order #{orderNumber.Trim().TrimStart('#')} cancellation restored {qty} product units"
+                        });
+                        if (!restored)
+                            throw new HoneyErpException(ErrorCode.InvalidData, "Unable to restore product batch stock for the cancelled order.");
                     }
                 }
 
@@ -1218,6 +1231,7 @@ namespace HoneyErpAPI.Repository
                 INNER JOIN MaterialBatchMaster mb ON mbu.materialBatchId = mb.id
                 INNER JOIN RawMaterialMaster rm ON mbu.materialId = rm.id
                 WHERE mbu.remark LIKE 'Order #' + @OrderNumber + ' %'
+                  AND (mbu.entryType = 'Out' OR mbu.entryType IS NULL)
                 ORDER BY mbu.id ASC";
             SqlParameter[] uP = { new SqlParameter("@OrderNumber", full.OrderNumber.Trim().TrimStart('#')) };
             DataTable dtUsage = _client.ExecuteAdapter(usageSql, uP, CommandType.Text).Tables[0];
@@ -1326,23 +1340,17 @@ namespace HoneyErpAPI.Repository
             {
                 decimal quantityUsed = bg.TotalQuantity;
 
-                SqlParameter[] spP = new SqlParameter[4];
-                spP[0] = new SqlParameter("@Remark", $"Order #{orderNumber.Trim().TrimStart('#')} consumed {quantityUsed:0.##} of '{bg.productName}'");
-                spP[1] = new SqlParameter("@ProductBatchId", bg.batchId);
-                spP[2] = new SqlParameter("@QuantityUsed", quantityUsed);
-                spP[3] = new SqlParameter("@ProductId", bg.productId);
-
-                bool isSuccess = _client.ExecuteScalar<bool>("AddProductBatchUsage", spP, CommandType.StoredProcedure);
+                bool isSuccess = _productRepository.AddProductBatchUsage(new ProductBatchUsage
+                {
+                    Remark = $"Order #{orderNumber.Trim().TrimStart('#')} consumed {quantityUsed:0.##} of '{bg.productName}'",
+                    ProductBatchEdid = EncryptionHelper.Encrypt(Convert.ToString(bg.batchId)!),
+                    QuantityUsed = quantityUsed,
+                    ProductEdid = EncryptionHelper.Encrypt(Convert.ToString(bg.productId)!),
+                    EntryType = MaterialBatchEntryType.Out
+                });
                 if (!isSuccess)
                 {
-                    SqlParameter[] deductP = {
-                        new SqlParameter("@BatchId", bg.batchId),
-                        new SqlParameter("@Qty", quantityUsed)
-                    };
-                    string deductSql = @"UPDATE ProductBatchMaster 
-                                         SET remainingQty = CASE WHEN remainingQty >= @Qty THEN remainingQty - @Qty ELSE 0 END 
-                                         WHERE id = @BatchId";
-                    _client.ExecuteNonQuery(deductSql, deductP, CommandType.Text);
+                    throw new HoneyErpException(ErrorCode.InvalidData, "Unable to deduct product batch stock for the order.");
                 }
             }
 
@@ -1391,13 +1399,12 @@ namespace HoneyErpAPI.Repository
                         decimal usedQty = Math.Min(remainingQty, batchRemaining);
                         if (usedQty <= 0) continue;
 
-                        SqlParameter[] spP = new SqlParameter[4];
-                        spP[0] = new SqlParameter("@Remark", $"Order #{orderNumber.Trim().TrimStart('#')} consumed {usedQty:0.##} of '{materialName}'");
-                        spP[1] = new SqlParameter("@MaterialBatchId", batchId);
-                        spP[2] = new SqlParameter("@QuantityUsed", usedQty);
-                        spP[3] = new SqlParameter("@MaterialId", materialId);
-
-                        bool isSuccess = _client.ExecuteScalar<bool>("AddMaterialBatchUsage", spP, CommandType.StoredProcedure);
+                        bool isSuccess = _materialBatchUsageRepository.Add(
+                            materialId,
+                            batchId,
+                            usedQty,
+                            MaterialBatchEntryType.Out,
+                            $"Order #{orderNumber.Trim().TrimStart('#')} consumed {usedQty:0.##} of '{materialName}'");
                         if (!isSuccess)
                         {
                             throw new HoneyErpException(ErrorCode.InternalError, $"Failed to record batch usage for material '{materialName}'.");

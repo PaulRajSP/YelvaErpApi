@@ -176,5 +176,29 @@ namespace HoneyErpAPI.Controllers
 
             return Ok(res);
         }
+
+        [HttpPatch("{productEdid}/batches/{productBatchEdid}/adjustment")]
+        public IActionResult AdjustProductBatch(string productEdid, string productBatchEdid, [FromBody] ProductBatchAdjustmentReq req)
+        {
+            _service.AdjustProductBatch(productEdid, productBatchEdid, req);
+            ApiResponseModel<BatchActionRes> res = new ApiResponseModel<BatchActionRes>
+            {
+                Success = true,
+                Message = "Product batch quantity adjusted successfully."
+            };
+            return Ok(res);
+        }
+
+        [HttpPatch("{productEdid}/batches/{productBatchEdid}/close")]
+        public IActionResult CloseProductBatch(string productEdid, string productBatchEdid)
+        {
+            _service.CloseProductBatch(productEdid, productBatchEdid);
+            ApiResponseModel<BatchActionRes> res = new ApiResponseModel<BatchActionRes>
+            {
+                Success = true,
+                Message = "Product batch closed successfully."
+            };
+            return Ok(res);
+        }
     }
 }

@@ -11,11 +11,18 @@ namespace HoneyErpAPI.Services
         private readonly IProductionRequestRepository _repo;
         private readonly IRawMaterialRepository _rawMaterialRepo;
         private readonly IProductRepository _productRepo;
-        public ProductionRequestService(IProductionRequestRepository repo, IRawMaterialRepository rawMaterialRepo, IProductRepository productRepo)
+        private readonly MaterialBatchUsageService _materialBatchUsageService;
+
+        public ProductionRequestService(
+            IProductionRequestRepository repo,
+            IRawMaterialRepository rawMaterialRepo,
+            IProductRepository productRepo,
+            MaterialBatchUsageService materialBatchUsageService)
         {
             _repo = repo;
             _rawMaterialRepo = rawMaterialRepo;
             _productRepo = productRepo;
+            _materialBatchUsageService = materialBatchUsageService;
 
         }
 
@@ -60,6 +67,12 @@ namespace HoneyErpAPI.Services
             // 3. Handle Completed Status
             if (req.Status == ProductionStatus.Completed)
             {
+                if (!req.PackedDate.HasValue)
+                    throw new HoneyErpException(ErrorCode.InvalidData, "Packed date is required.");
+                if (!req.ShelfLifeMonths.HasValue || !ProductBatchOptions.ShelfLifeMonths.Contains(req.ShelfLifeMonths.Value))
+                    throw new HoneyErpException(ErrorCode.InvalidData, "Choose a shelf life of 12 or 18 months.");
+                if (req.PackedDate.Value.Date > DateTime.Today)
+                    throw new HoneyErpException(ErrorCode.InvalidData, "Packed date cannot be in the future.");
                 if (req.CompletedQty <= 0)
                     throw new HoneyErpException(ErrorCode.InvalidData, "Completed quantity must be greater than zero.");
 
@@ -123,9 +136,11 @@ namespace HoneyErpAPI.Services
                     materialBatchUsage.MaterialEdid = usage.Material.MaterialEdid;
                     materialBatchUsage.MaterialBatchEdid = usage.Material.MaterialBatchEdid;
                     materialBatchUsage.QuantityUsed = usage.Quantity;
+                    materialBatchUsage.EntryType = MaterialBatchEntryType.Out;
                     materialBatchUsage.Remark = $"Production Request #{productionRequest.RequestNumber} consumed {usage.Quantity} of '{usage.Material.MaterialName}'";
-                    
-                    _rawMaterialRepo.AddMaterialBatchUsage(materialBatchUsage);
+
+                    if (!_materialBatchUsageService.AddMaterialBatchUsage(materialBatchUsage))
+                        throw new HoneyErpException(ErrorCode.InvalidData, $"Insufficient stock for '{usage.Material.MaterialName}'.");
                 }
 
                 // 7. Create Finished Product Batch
@@ -134,6 +149,8 @@ namespace HoneyErpAPI.Services
                 productBatch.BatchNumber = Utilities.GeneratePublicId("HY", 5);
                 productBatch.ProducedQty = additionalCompletedQty;
                 productBatch.AvailableQty = additionalCompletedQty;
+                productBatch.PackedDate = req.PackedDate.Value.Date;
+                productBatch.ExpiryDate = req.PackedDate.Value.Date.AddMonths(req.ShelfLifeMonths.Value);
                 productBatch.Remark = $"Production Request #{productionRequest.RequestNumber} produced {additionalCompletedQty} additional units";
                 
                 _productRepo.AddProductBatchMaster(productBatch);

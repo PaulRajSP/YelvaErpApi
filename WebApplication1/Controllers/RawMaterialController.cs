@@ -114,34 +114,6 @@ namespace HoneyErpAPI.Controllers
             return Ok(res);
         }
 
-        [HttpPost("{materialEdid}/usage-history/{materialBatchEdid}")]
-        public IActionResult GetUsageHistory(string materialEdid, string materialBatchEdid)
-        {
-            GetMaterialUsageHistoryReq req = new GetMaterialUsageHistoryReq();
-            req.MaterialEdid = materialEdid;
-            req.MaterialBatchEdid = materialBatchEdid;
-
-            ApiResponseModel<MaterialUsageHistoryRes> res = new ApiResponseModel<MaterialUsageHistoryRes>();
-            res.Success = true;
-            res.Data = _service.GetUsageHistory(req);
-            res.Message = "Usage history fetched successfully";
-
-            return Ok(res);
-        }
-
-        [HttpPost("{materialEdid}/batch-list")]
-        public IActionResult GetMaterialBatchList(string materialEdid, [FromBody] GetMaterialBatchListReq req)
-        {
-            req.materialEdid = materialEdid;
-
-            ApiResponseModel<PageResult<GetMaterialBatchListItem>> res = new ApiResponseModel<PageResult<GetMaterialBatchListItem>>();
-            res.Success = true;
-            res.Data = _service.GetMaterialBatchList(req);
-            res.Message = "Material batch list fetched successfully";
-
-            return Ok(res);
-        }
-
         [HttpGet("packing-materials")]
         public IActionResult GetPackingMaterials([FromQuery] string? searchKeyword = null)
         {

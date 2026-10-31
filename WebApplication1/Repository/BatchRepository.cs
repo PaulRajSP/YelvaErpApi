@@ -11,12 +11,12 @@ namespace HoneyErpAPI.Repository
         GetBatchListRes GetBatches(string materialEdid, string? batchNumber, decimal? unitCost, string? supplierEdid);
         GetBatchByIdRes? GetBatchById(string edid);
         CreateBatchRes CreateBatch(CreateBatchReq req);
-        bool UpdateBatchQty(string edid, decimal qtyRemaining);
     }
 
     public class BatchRepository : IBatchRepository
     {
         private readonly DbClient _client;
+
         public BatchRepository(DbClient client) => _client = client;
 
         public GetBatchListRes GetBatches(string materialEdid, string? batchNumber, decimal? unitCost, string? supplierEdid)
@@ -30,6 +30,7 @@ namespace HoneyErpAPI.Repository
             string query = @"SELECT id, materialId, supplierId, batchNumber, qtyPurchased, qtyRemaining, ISNULL(unitCost, 0) AS unitCost
                              FROM MaterialBatchMaster
                              WHERE materialId = @MaterialId
+                               AND (isActive = 1 OR isActive IS NULL)
                                AND (@batchNumber IS NULL OR batchNumber LIKE '%' + @batchNumber + '%')
                                AND (@UnitCost IS NULL OR unitCost <= @UnitCost AND @UnitCost < unitCost + 0.10)
                                AND (@SupplierId IS NULL OR supplierId = @SupplierId)";
@@ -96,12 +97,5 @@ namespace HoneyErpAPI.Repository
             return res;
         }
 
-        public bool UpdateBatchQty(string edid, decimal qtyRemaining)
-        {
-            SqlParameter[] p = new SqlParameter[2];
-            p[0] = new SqlParameter("@Id",           EncryptionHelper.Decrypt(edid));
-            p[1] = new SqlParameter("@QtyRemaining", qtyRemaining);
-            return _client.ExecuteNonQuery("UPDATE MaterialBatchMaster SET qtyRemaining=@QtyRemaining WHERE id=@Id", p, CommandType.Text) > 0;
-        }
     }
 }

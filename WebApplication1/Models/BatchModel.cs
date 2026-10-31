@@ -53,4 +53,11 @@ namespace HoneyErpAPI.Models
     }
 
     public class BatchActionRes : BaseApiResponse { }
+
+    public class MaterialBatchAdjustmentReq : BaseApiRequest
+    {
+        public MaterialBatchEntryType EntryType { get; set; }
+        public decimal Quantity { get; set; }
+        public string? Remark { get; set; }
+    }
 }

@@ -103,9 +103,16 @@ namespace HoneyErpAPI.Repository
                             ISNULL((SELECT SUM(pb.remainingQty) FROM ProductBatchMaster pb WHERE pb.productId = p.id AND pb.isActive = 1), 0) AS productStock,
                             pr.requestedQty, pr.completedQty, pr.status, pr.priority,
                             pr.reason, pr.requestedBy, ISNULL(productionCost.productionUnitCost, 0) AS productionUnitCost,
-                            pr.createdAt
+                            pr.createdAt, productionBatch.packedDate, productionBatch.expiryDate
                      FROM ProductionRequest pr
                      LEFT JOIN ProductMaster p ON pr.productId = p.id
+                     OUTER APPLY (
+                         SELECT TOP 1 pb.packedDate, pb.expiryDate
+                         FROM ProductBatchMaster pb
+                         WHERE pb.productId = pr.productId
+                           AND pb.remarks LIKE 'Production Request #' + pr.requestNumber + ' produced %'
+                         ORDER BY pb.createdAt DESC, pb.id DESC
+                     ) productionBatch
                      OUTER APPLY (
                          SELECT SUM(ri.qty * ISNULL(pc.averageRate, 0)) AS productionUnitCost
                          FROM RecipeItem ri
@@ -142,6 +149,8 @@ namespace HoneyErpAPI.Repository
             res.RequestedBy = row.Field<string>("requestedBy");
             res.ProductionUnitCost = row.Field<decimal?>("productionUnitCost");
             res.CreatedAt = row.Field<DateTime>("createdAt");
+            res.PackedDate = row.Field<DateTime?>("packedDate");
+            res.ExpiryDate = row.Field<DateTime?>("expiryDate");
 
             // Query materials linked to this request
             SqlParameter[] matP = new SqlParameter[2];

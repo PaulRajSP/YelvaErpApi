@@ -41,6 +41,7 @@ namespace WebApplication1.Common
             public string MaterialBatchEdid { get; set; }
             public decimal QuantityUsed { get; set; }
             public string MaterialEdid { get; set; }
+            public MaterialBatchEntryType EntryType { get; set; } = MaterialBatchEntryType.Out;
         }
 
         public class ProductBatchUsage
@@ -49,6 +50,7 @@ namespace WebApplication1.Common
             public string ProductBatchEdid { get; set; } = string.Empty;
             public decimal QuantityUsed { get; set; }
             public string ProductEdid { get; set; } = string.Empty;
+            public MaterialBatchEntryType EntryType { get; set; } = MaterialBatchEntryType.Out;
         }
 
         public class ListResult<T> : BaseApiResponse

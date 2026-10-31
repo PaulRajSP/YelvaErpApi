@@ -60,6 +60,9 @@ namespace HoneyErpAPI.Repository
                 case "ProductionPriority":
                     res.Items = Enum.GetNames(typeof(ProductionPriority)).ToList();
                     break;
+                case "ShelfLifeMonths":
+                    res.Items = ProductBatchOptions.ShelfLifeMonths.Select(months => months.ToString()).ToList();
+                    break;
                 case "OrderStatus":
                     res.Items = Enum.GetNames(typeof(OrderStatus)).ToList();
                     break;
