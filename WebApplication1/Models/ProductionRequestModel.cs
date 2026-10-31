@@ -151,5 +151,8 @@ namespace HoneyErpAPI.Models
     {
         public string materialBatchEdid { get; set; }
         public string batchNumber { get; set; }
+        public DateTime? latestUsageDate { get; set; }
+        public int entriesCount { get; set; }
+        public decimal totalUsed { get; set; }
     }
 }

@@ -362,7 +362,7 @@ namespace HoneyErpAPI.Repository
             SqlParameter[] cp = { new SqlParameter("@MaterialId", materialId) };
             int total = _client.ExecuteScalar<int>(countQuery, cp, CommandType.Text);
 
-            string query = @"SELECT pm.id AS invoiceNumber, sm.name AS supplierName, mb.batchNumber,
+            string query = @"SELECT pm.id AS purchaseId, pm.publicNumber AS purchaseNumber, sm.name AS supplierName, mb.batchNumber,
                             pi.quantity AS qty, pi.rate, pm.date
                      FROM PurchaseItem pi
                      INNER JOIN PurchaseMaster pm ON pi.purchaseId = pm.id
@@ -383,12 +383,12 @@ namespace HoneyErpAPI.Repository
 
             foreach (DataRow row in dt.Rows)
             {
-                string invNum = Convert.ToString(row["invoiceNumber"]) ?? string.Empty;
+                string purchaseId = Convert.ToString(row["purchaseId"]) ?? string.Empty;
 
                 res.Items.Add(new MaterialPurchaseHistoryItem
                 {
-                    InvoiceNumber = invNum,
-                    PurchaseEdid = EncryptionHelper.Encrypt(invNum),
+                    PurchaseNumber = row.Field<string>("purchaseNumber") ?? string.Empty,
+                    PurchaseEdid = EncryptionHelper.Encrypt(purchaseId),
                     SupplierName = row.Field<string>("supplierName") ?? string.Empty,
                     BatchNumber = row.Field<string?>("batchNumber") ?? string.Empty,
                     Quantity = row.Field<decimal>("qty"),
@@ -467,12 +467,21 @@ namespace HoneyErpAPI.Repository
             p[2] = new SqlParameter("@Offset", offset);
             p[3] = new SqlParameter("@PageSize", pageSize);
 
-            string query = @"SELECT id, batchNumber, COUNT(*) OVER() AS totalCount
-                     FROM MaterialBatchMaster
-                     WHERE materialId = @MaterialId
-                     AND isActive = 1
-                     AND (@Search IS NULL OR batchNumber LIKE '%' + @Search + '%')
-                     ORDER BY id DESC
+            string query = @"SELECT mb.id, mb.batchNumber, COUNT(*) OVER() AS totalCount,
+                            usageSummary.latestUsageDate, usageSummary.entriesCount, usageSummary.totalUsed
+                     FROM MaterialBatchMaster mb
+                     OUTER APPLY
+                     (
+                         SELECT MAX(mbu.createdAt) AS latestUsageDate,
+                                COUNT(*) AS entriesCount,
+                                COALESCE(SUM(mbu.quantityUsed), 0) AS totalUsed
+                         FROM MaterialBatchUsage mbu
+                         WHERE mbu.materialBatchId = mb.id
+                     ) usageSummary
+                     WHERE mb.materialId = @MaterialId
+                     AND mb.isActive = 1
+                     AND (@Search IS NULL OR mb.batchNumber LIKE '%' + @Search + '%')
+                     ORDER BY mb.id DESC
                      OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
 
             DataTable dt = _client.ExecuteAdapter(query, p, CommandType.Text).Tables[0];
@@ -489,6 +498,9 @@ namespace HoneyErpAPI.Repository
                 GetMaterialBatchListItem item = new GetMaterialBatchListItem();
                 item.materialBatchEdid = EncryptionHelper.Encrypt(Convert.ToString(row["id"]));
                 item.batchNumber = row.Field<string>("batchNumber") ?? string.Empty;
+                item.latestUsageDate = row.Field<DateTime?>("latestUsageDate");
+                item.entriesCount = row.Field<int>("entriesCount");
+                item.totalUsed = row.Field<decimal>("totalUsed");
 
                 res.Items.Add(item);
             }

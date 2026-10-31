@@ -45,5 +45,17 @@ namespace HoneyErpAPI.Controllers
                 Data = data
             });
         }
+
+        [HttpGet("top-selling")]
+        public IActionResult GetTopSellingProducts([FromQuery] string? period = "today", [FromQuery] string? date = null, [FromQuery] int? timezoneOffset = null)
+        {
+            var data = _service.GetTopSellingProducts(period, date, timezoneOffset);
+            return Ok(new ApiResponseModel<TopSellingProductsRes>
+            {
+                Success = true,
+                Message = "Top-selling products fetched successfully",
+                Data = data
+            });
+        }
     }
 }

@@ -36,20 +36,25 @@ namespace HoneyErpAPI.Repository
             int pageSize = req.PaginationRequest?.PageSize > 0 ? req.PaginationRequest.PageSize : 10;
             int offset = (pageNumber - 1) * pageSize;
 
-            SqlParameter[] p = new SqlParameter[4];
+            SqlParameter[] p = new SqlParameter[5];
             p[0] = new SqlParameter("@OnlyActive", req.OnlyActive);
             p[1] = new SqlParameter("@SearchText", Utilities.DbValue(req.SearchText?.Trim()));
             p[2] = new SqlParameter("@Offset", offset);
             p[3] = new SqlParameter("@PageSize", pageSize);
+            p[4] = new SqlParameter("@IsActive", req.IsActive.HasValue ? req.IsActive.Value : DBNull.Value);
 
             string query = @"SELECT c.id, c.name, c.contactPerson, c.mobile, c.isActive
-            FROM CourierMaster c WHERE (@OnlyActive = 0 OR c.isActive = 1)
+            FROM CourierMaster c
+            WHERE ((@IsActive IS NOT NULL AND c.isActive = @IsActive)
+                OR (@IsActive IS NULL AND (@OnlyActive = 0 OR c.isActive = 1)))
             AND (@SearchText IS NULL OR c.name LIKE '%' + @SearchText + '%' OR c.contactPerson LIKE '%' + @SearchText + '%' OR c.mobile LIKE '%' + @SearchText + '%')
             ORDER BY c.name ASC OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
 
-            SELECT COUNT(*) AS TotalCount FROM CourierMaster
-            WHERE (@OnlyActive = 0 OR isActive = 1)
-            AND (@SearchText IS NULL OR name LIKE '%' + @SearchText + '%' OR contactPerson LIKE '%' + @SearchText + '%' OR mobile LIKE '%' + @SearchText + '%')";
+            SELECT COUNT(*) AS TotalCount
+            FROM CourierMaster c
+            WHERE ((@IsActive IS NOT NULL AND c.isActive = @IsActive)
+                OR (@IsActive IS NULL AND (@OnlyActive = 0 OR c.isActive = 1)))
+            AND (@SearchText IS NULL OR c.name LIKE '%' + @SearchText + '%' OR c.contactPerson LIKE '%' + @SearchText + '%' OR c.mobile LIKE '%' + @SearchText + '%')";
 
             DataSet ds = _client.ExecuteAdapter(query, p, CommandType.Text);
             DataTable dt = ds.Tables[0];
@@ -244,4 +249,3 @@ namespace HoneyErpAPI.Repository
         }
     }
 }
-

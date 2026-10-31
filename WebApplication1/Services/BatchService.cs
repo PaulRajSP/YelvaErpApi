@@ -13,7 +13,7 @@ namespace HoneyErpAPI.Services
             _repo = repo;
         }
 
-        public GetBatchListRes GetBatches(string materialEdid, string? batchNumber) => _repo.GetBatches(materialEdid, batchNumber);
+        public GetBatchListRes GetBatches(string materialEdid, string? batchNumber, decimal? unitCost, string? supplierEdid) => _repo.GetBatches(materialEdid, batchNumber, unitCost, supplierEdid);
 
         public GetBatchByIdRes GetBatchById(string edid)
         {

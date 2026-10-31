@@ -17,11 +17,11 @@ namespace HoneyErpAPI.Controllers
         }
 
         [HttpGet("material/{materialEdid}")]
-        public IActionResult GetBatches(string materialEdid, [FromQuery] string? batchNumber)
+        public IActionResult GetBatches(string materialEdid, [FromQuery] string? batchNumber, [FromQuery] decimal? unitCost, [FromQuery] string? supplierEdid)
         {
             ApiResponseModel<GetBatchListRes> res = new ApiResponseModel<GetBatchListRes>();
             res.Success = true;
-            res.Data    = _service.GetBatches(materialEdid, batchNumber);
+            res.Data    = _service.GetBatches(materialEdid, batchNumber, unitCost, supplierEdid);
             res.Message = "Batches fetched successfully";
             return Ok(res);
         }

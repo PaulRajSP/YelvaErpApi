@@ -16,6 +16,7 @@ namespace HoneyErpAPI.Models
     public class GetCourierListReq
     {
         public bool OnlyActive { get; set; } = false;
+        public bool? IsActive { get; set; }
         public string? SearchText { get; set; }
         public PaginationRequest PaginationRequest { get; set; }
     }
@@ -83,4 +84,3 @@ namespace HoneyErpAPI.Models
         public bool Success { get; set; } = true;
     }
 }
-

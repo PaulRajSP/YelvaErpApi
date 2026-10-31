@@ -11,6 +11,7 @@ namespace HoneyErpAPI.Repository
     {
         DashboardTodaySummaryRes GetSummary(string? period, string? dateString, int? timezoneOffsetMinutes);
         SalesReportRes GetSalesReport(string? period, string? dateString, int? timezoneOffsetMinutes);
+        TopSellingProductsRes GetTopSellingProducts(string? period, string? dateString, int? timezoneOffsetMinutes);
     }
 
     public class DashboardRepository : IDashboardRepository
@@ -316,6 +317,82 @@ namespace HoneyErpAPI.Repository
                 : 0;
 
             return res;
+        }
+
+        public TopSellingProductsRes GetTopSellingProducts(string? period, string? dateString, int? timezoneOffsetMinutes)
+        {
+            string normPeriod = (period ?? "today").Trim().ToLowerInvariant();
+
+            DateTime localToday;
+            if (!string.IsNullOrWhiteSpace(dateString) && DateTime.TryParse(dateString, out DateTime parsedDate))
+            {
+                localToday = parsedDate.Date;
+            }
+            else
+            {
+                localToday = DateTime.UtcNow.Date;
+            }
+
+            int offset = timezoneOffsetMinutes ?? 0;
+            DateTime endUtc = DateTime.SpecifyKind(localToday.AddDays(1).AddMinutes(offset), DateTimeKind.Utc);
+
+            DateTime startUtc;
+            switch (normPeriod)
+            {
+                case "1week":
+                case "week":
+                case "7days":
+                    startUtc = DateTime.SpecifyKind(localToday.AddDays(-6).AddMinutes(offset), DateTimeKind.Utc);
+                    break;
+
+                case "1month":
+                case "month":
+                case "30days":
+                    normPeriod = "1month";
+                    startUtc = DateTime.SpecifyKind(localToday.AddDays(-29).AddMinutes(offset), DateTimeKind.Utc);
+                    break;
+
+                case "today":
+                default:
+                    normPeriod = "today";
+                    startUtc = DateTime.SpecifyKind(localToday.AddMinutes(offset), DateTimeKind.Utc);
+                    break;
+            }
+
+            const string query = @"
+                SELECT TOP (3)
+                    oi.productId AS ProductId,
+                    COALESCE(NULLIF(MAX(oi.productNameSnapshot), ''), CONCAT('Product ', oi.productId)) AS ProductName,
+                    SUM(oi.quantity) AS QtySold,
+                    SUM(oi.quantity * oi.unitPrice) AS Revenue
+                FROM OrderItem oi
+                INNER JOIN OrderMaster o ON oi.orderId = o.id
+                WHERE o.status != 'Cancelled'
+                  AND o.createdAt >= @StartUtc AND o.createdAt < @EndUtc
+                GROUP BY oi.productId
+                ORDER BY SUM(oi.quantity * oi.unitPrice) DESC, SUM(oi.quantity) DESC, oi.productId ASC";
+
+            SqlParameter[] parameters =
+            {
+                new SqlParameter("@StartUtc", startUtc),
+                new SqlParameter("@EndUtc", endUtc)
+            };
+
+            DataTable dt = _client.ExecuteAdapter(query, parameters, CommandType.Text).Tables[0];
+            TopSellingProductsRes response = new TopSellingProductsRes { Period = normPeriod };
+
+            foreach (DataRow row in dt.Rows)
+            {
+                response.Items.Add(new TopSellingProductItem
+                {
+                    ProductId = Convert.ToInt32(row["ProductId"]),
+                    ProductName = Convert.ToString(row["ProductName"]) ?? string.Empty,
+                    QtySold = Convert.ToInt32(row["QtySold"]),
+                    Revenue = Convert.ToDecimal(row["Revenue"])
+                });
+            }
+
+            return response;
         }
     }
 }
