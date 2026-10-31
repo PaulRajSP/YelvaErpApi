@@ -9,12 +9,13 @@ namespace HoneyErpAPI.Common
 
         public DbClient(IConfiguration configuration)
         {
-            _connectionString = configuration.GetConnectionString("DefaultConnection")
+            _connectionString = configuration["DBConnectionStrings:DefaultConnection"]
+                ?? configuration.GetConnectionString("DefaultConnection")
                 ?? throw new InvalidOperationException("DefaultConnection string is not configured.");
         }
 
         // ----------------------------------------------------------------
-        // Returns a filled DataSet — use for SELECT queries
+        // Returns a filled DataSet ï¿½ use for SELECT queries
         // ----------------------------------------------------------------
 
         public DataSet ExecuteAdapter(string commandText, SqlParameter[]? parameters, CommandType commandType)
@@ -73,7 +74,7 @@ namespace HoneyErpAPI.Common
 
 
         // ----------------------------------------------------------------
-        // Returns rows affected — use for INSERT / UPDATE / DELETE
+        // Returns rows affected ï¿½ use for INSERT / UPDATE / DELETE
         // ----------------------------------------------------------------
         public int ExecuteNonQuery(string commandText, SqlParameter[]? parameters, CommandType commandType)
         {

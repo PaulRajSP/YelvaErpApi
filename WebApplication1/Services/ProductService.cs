@@ -87,6 +87,15 @@ namespace HoneyErpAPI.Services
                 throw new HoneyErpException(ErrorCode.InvalidData,
                     "Production quantity must be greater than zero.");
 
+            if (!req.ShelfLifeMonths.HasValue || !ProductBatchOptions.ShelfLifeMonths.Contains(req.ShelfLifeMonths.Value))
+                throw new HoneyErpException(ErrorCode.InvalidData, "Choose a shelf life of 12 or 18 months.");
+            if (!req.PackedDate.HasValue)
+                throw new HoneyErpException(ErrorCode.InvalidData, "Packed date is required.");
+            if (req.PackedDate.Value.Date > DateTime.Today)
+                throw new HoneyErpException(ErrorCode.InvalidData, "Packed date cannot be in the future.");
+            req.PackedDate = req.PackedDate.Value.Date;
+            req.ExpiryDate = req.PackedDate.Value.AddMonths(req.ShelfLifeMonths.Value);
+
             if (req.Materials == null || req.Materials.Count == 0)
                 throw new HoneyErpException(ErrorCode.InvalidData,
                     "At least one material is required.");
@@ -103,6 +112,42 @@ namespace HoneyErpAPI.Services
         }
 
         public ProductUsageHistoryRes GetUsageHistory(GetProductUsageHistoryReq req) => _repo.GetUsageHistory(req);
+
+        public void AdjustProductBatch(string productEdid, string productBatchEdid, ProductBatchAdjustmentReq req)
+        {
+            if (req.Quantity <= 0)
+                throw new HoneyErpException(ErrorCode.InvalidData, "Adjustment quantity must be greater than zero.");
+            if (!Enum.IsDefined(req.EntryType))
+                throw new HoneyErpException(ErrorCode.InvalidData, "Choose a valid adjustment type.");
+            if (string.IsNullOrWhiteSpace(req.Remark))
+                throw new HoneyErpException(ErrorCode.InvalidData, "A remark is required for every stock adjustment.");
+
+            bool adjusted = _repo.AddProductBatchUsage(new ProductBatchUsage
+            {
+                ProductEdid = productEdid,
+                ProductBatchEdid = productBatchEdid,
+                QuantityUsed = req.Quantity,
+                EntryType = req.EntryType,
+                Remark = req.Remark.Trim()
+            });
+
+            if (!adjusted)
+                throw new HoneyErpException(ErrorCode.InvalidData, "Adjustment could not be applied. Check the batch status and remaining stock.");
+        }
+
+        public void CloseProductBatch(string productEdid, string productBatchEdid)
+        {
+            int productId = EncryptionHelper.Decrypt<int>(productEdid);
+            int productBatchId = EncryptionHelper.Decrypt<int>(productBatchEdid);
+            int result = _repo.CloseProductBatch(productId, productBatchId);
+
+            if (result == 0)
+                throw new HoneyErpException(ErrorCode.NotFound, "Product batch not found.");
+            if (result == -1)
+                throw new HoneyErpException(ErrorCode.InvalidData, "Product batch is already closed.");
+            if (result == -2)
+                throw new HoneyErpException(ErrorCode.InvalidData, "Product batch can only be closed when remaining stock is zero.");
+        }
 
         public PageResult<ProductBatchListItem> GetProductBatchList(GetProductBatchListReq req) => _repo.GetProductBatchList(req);
     }

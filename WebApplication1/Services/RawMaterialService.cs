@@ -74,9 +74,6 @@ namespace HoneyErpAPI.Services
             return result;
         }
 
-        public MaterialUsageHistoryRes GetUsageHistory(GetMaterialUsageHistoryReq req) => _repo.GetUsageHistory(req);
-
-        public PageResult<GetMaterialBatchListItem> GetMaterialBatchList(GetMaterialBatchListReq req) => _repo.GetMaterialBatchList(req);
         public GetPackingMaterialsRes GetPackingMaterials(string? searchKeyword = null) => _repo.GetPackingMaterials(searchKeyword);
     }
 }

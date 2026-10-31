@@ -26,6 +26,8 @@ namespace HoneyErpAPI.Models
         public bool IsActive { get; set; }
         public string? Remarks { get; set; }
         public DateTime CreatedAt { get; set; }
+        public DateTime? PackedDate { get; set; }
+        public DateTime? ExpiryDate { get; set; }
         public DateTime? LatestUsageDate { get; set; }
         public int EntriesCount { get; set; }
         public decimal TotalUsed { get; set; }
@@ -41,6 +43,13 @@ namespace HoneyErpAPI.Models
         public string? SearchRemark { get; set; }
     }
 
+    public class ProductBatchAdjustmentReq
+    {
+        public MaterialBatchEntryType EntryType { get; set; }
+        public decimal Quantity { get; set; }
+        public string? Remark { get; set; }
+    }
+
     public class ProductUsageHistoryRes : BaseApiResponse
     {
         public List<ProductUsageHistoryItem> Items { get; set; } = new();
@@ -50,6 +59,7 @@ namespace HoneyErpAPI.Models
     {
         public string Remark { get; set; } = string.Empty;
         public decimal QuantityUsed { get; set; }
+        public MaterialBatchEntryType EntryType { get; set; } = MaterialBatchEntryType.Out;
         public DateTime UsageDate { get; set; }
     }
 }

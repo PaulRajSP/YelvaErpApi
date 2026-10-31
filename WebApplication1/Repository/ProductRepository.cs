@@ -25,13 +25,20 @@ namespace HoneyErpAPI.Repository
         bool AddProductBatchMaster(ProductBatchEntry req);
         ProductUsageHistoryRes GetUsageHistory(GetProductUsageHistoryReq req);
         bool AddProductBatchUsage(ProductBatchUsage req);
+        int CloseProductBatch(int productId, int productBatchId);
         PageResult<ProductBatchListItem> GetProductBatchList(GetProductBatchListReq req);
     }
 
     public class ProductRepository : IProductRepository
     {
         private readonly DbClient _client;
-        public ProductRepository(DbClient client) => _client = client;
+        private readonly IMaterialBatchUsageRepository _materialBatchUsageRepository;
+
+        public ProductRepository(DbClient client, IMaterialBatchUsageRepository materialBatchUsageRepository)
+        {
+            _client = client;
+            _materialBatchUsageRepository = materialBatchUsageRepository;
+        }
 
         // ── Product ───────────────────────────────────────────────────────────
         public PageResult<ProductListItem> GetAllProduct(GetProductListReq req)
@@ -558,12 +565,6 @@ namespace HoneyErpAPI.Repository
                 resolvedBatchNumber  = pbDt.Rows[0].Field<string>("batchNumber")!;
                 existingRemainingQty = pbDt.Rows[0].Field<decimal>("remainingQty");
 
-                // Update remaining qty for existing batch
-                SqlParameter[] pbUpdateP = new SqlParameter[2];
-                pbUpdateP[0] = new SqlParameter("@ProductionQty", req.ProductionQty);
-                pbUpdateP[1] = new SqlParameter("@BatchId", batchId);
-                string pbUpdateQuery = "UPDATE ProductBatchMaster SET remainingQty = remainingQty + @ProductionQty WHERE id = @BatchId";
-                _client.ExecuteNonQuery(pbUpdateQuery, pbUpdateP, CommandType.Text);
             }
             else
             {
@@ -573,17 +574,19 @@ namespace HoneyErpAPI.Repository
                 resolvedBatchNumber  = $"PB-{date}{randPart}";
                 existingRemainingQty = 0;
 
-                SqlParameter[] newBP = new SqlParameter[5];
+                SqlParameter[] newBP = new SqlParameter[7];
                 newBP[0] = new SqlParameter("@BatchNumber",   resolvedBatchNumber);
                 newBP[1] = new SqlParameter("@ProductId",     productId);
                 newBP[2] = new SqlParameter("@ProductionQty", req.ProductionQty);
-                newBP[3] = new SqlParameter("@RemainingQty",  req.ProductionQty);
+                newBP[3] = new SqlParameter("@RemainingQty",  0);
                 newBP[4] = new SqlParameter("@Remarks",       Utilities.DbValue(req.Remarks));
+                newBP[5] = new SqlParameter("@PackedDate", Utilities.DbValue(req.PackedDate));
+                newBP[6] = new SqlParameter("@ExpiryDate", Utilities.DbValue(req.ExpiryDate));
 
                 string newBatchQuery = @"INSERT INTO ProductBatchMaster
-                        (batchNumber, productId, productionQty, remainingQty, isActive, remarks, createdAt)
+                        (batchNumber, productId, productionQty, remainingQty, isActive, remarks, createdAt, packedDate, expiryDate)
                       OUTPUT INSERTED.id
-                      VALUES (@BatchNumber, @ProductId, @ProductionQty, @RemainingQty, 1, @Remarks, GETDATE())";
+                      VALUES (@BatchNumber, @ProductId, @ProductionQty, @RemainingQty, 1, @Remarks, GETDATE(), @PackedDate, @ExpiryDate)";
                 productBatchId = _client.ExecuteScalar<int>(newBatchQuery, newBP, CommandType.Text);
             }
 
@@ -598,28 +601,27 @@ namespace HoneyErpAPI.Repository
                 rqP[1] = new SqlParameter("@MaterialId", materialId);
                 string recipeQuery = "SELECT id, qty FROM RecipeItem WHERE productId = @ProductId AND materialId = @MaterialId AND (isActive = 1 OR isActive IS NULL)";
                 DataTable recipeDt = _client.ExecuteAdapter(recipeQuery, rqP, CommandType.Text).Tables[0];
-                int? recipeItemId = recipeDt.Rows.Count > 0 ? recipeDt.Rows[0].Field<int>("id") : null;
                 decimal recipeQty = recipeDt.Rows.Count > 0 ? recipeDt.Rows[0].Field<decimal>("qty") : 1m;
                 decimal actualQtyUsed = recipeQty * req.ProductionQty;
 
-                // Reduce MaterialBatchMaster.qtyRemaining
-                SqlParameter[] deductP = new SqlParameter[2];
-                deductP[0] = new SqlParameter("@QtyUsed", actualQtyUsed);
-                deductP[1] = new SqlParameter("@BatchId",  materialBatchId);
-                string deductQuery = "UPDATE MaterialBatchMaster SET qtyRemaining = qtyRemaining - @QtyUsed WHERE id = @BatchId";
-                _client.ExecuteNonQuery(deductQuery, deductP, CommandType.Text);
+                bool recorded = _materialBatchUsageRepository.Add(
+                    materialId,
+                    materialBatchId,
+                    actualQtyUsed,
+                    MaterialBatchEntryType.Out,
+                    $"Batch #{resolvedBatchNumber} production consumed {actualQtyUsed}");
+                if (!recorded)
+                    throw new HoneyErpException(ErrorCode.InvalidData, "Insufficient material batch stock for production.");
+            }
 
-                // Insert MaterialBatchUsage
-                SqlParameter[] usageP = new SqlParameter[5];
-                usageP[0] = new SqlParameter("@Remark",          $"Batch #{resolvedBatchNumber} production consumed {actualQtyUsed}");
-                usageP[1] = new SqlParameter("@MaterialBatchId", materialBatchId);
-                usageP[2] = new SqlParameter("@QuantityUsed",    actualQtyUsed);
-                usageP[3] = new SqlParameter("@MaterialId",      materialId);
-                usageP[4] = new SqlParameter("@CreatedAt",       DateTime.Now);
-                string usageQuery = @"INSERT INTO MaterialBatchUsage
-                        (remark, materialBatchId, quantityUsed, materialId, createdAt)
-                      VALUES (@Remark, @MaterialBatchId, @QuantityUsed, @MaterialId, @CreatedAt)";
-                _client.ExecuteNonQuery(usageQuery, usageP, CommandType.Text);
+            if (!RecordProductBatchUsage(
+                    productId,
+                    productBatchId,
+                    req.ProductionQty,
+                    MaterialBatchEntryType.In,
+                    req.Remarks ?? $"Batch #{resolvedBatchNumber} production received {req.ProductionQty}"))
+            {
+                throw new HoneyErpException(ErrorCode.InvalidData, "Unable to record produced product batch quantity.");
             }
 
             // ── Insert ProductReconciliation ──────────────────────────────────────
@@ -725,19 +727,44 @@ namespace HoneyErpAPI.Repository
 
         public bool AddProductBatchMaster(ProductBatchEntry req)
         {
-            string productId = EncryptionHelper.Decrypt(req.ProductEdid);
+            int productId = EncryptionHelper.Decrypt<int>(req.ProductEdid);
+            SqlParameter[] parameters =
+            {
+                new("@BatchNumber", Utilities.DbValue(req.BatchNumber)),
+                new("@ProductId", productId),
+                new("@ProductionQty", req.ProducedQty),
+                new("@RemainingQty", req.AvailableQty),
+                new("@PackedDate", req.PackedDate),
+                new("@ExpiryDate", req.ExpiryDate),
+                new("@Remark", Utilities.DbValue(req.Remark))
+            };
 
-            SqlParameter[] p = new SqlParameter[5];
-            p[0] = new SqlParameter("@BatchNumber", Utilities.DbValue(req.BatchNumber));
-            p[1] = new SqlParameter("@ProductId", productId);
-            p[2] = new SqlParameter("@ProductionQty", req.ProducedQty);
-            p[3] = new SqlParameter("@RemainingQty", req.AvailableQty);
-            p[4] = new SqlParameter("@Remarks", Utilities.DbValue(req.Remark));
+            const string query = @"
+                SET NOCOUNT ON;
+                BEGIN TRY
+                    BEGIN TRANSACTION;
 
-            string query = @"INSERT INTO ProductBatchMaster(batchNumber,productId,productionQty,remainingQty,isActive,remarks)
-                             VALUES(@BatchNumber,@ProductId,@ProductionQty,@RemainingQty,1,@Remarks)";
+                    DECLARE @ProductBatchId INT;
+                    INSERT INTO ProductBatchMaster
+                        (batchNumber, productId, productionQty, remainingQty, isActive, remarks, packedDate, expiryDate)
+                    VALUES
+                        (@BatchNumber, @ProductId, @ProductionQty, @RemainingQty, 1, @Remark, @PackedDate, @ExpiryDate);
+                    SET @ProductBatchId = SCOPE_IDENTITY();
 
-            return _client.ExecuteNonQuery(query, p, CommandType.Text) > 0;
+                    INSERT INTO ProductBatchUsage
+                        (remark, productBatchId, quantityUsed, productId, entryType)
+                    VALUES
+                        (@Remark, @ProductBatchId, @RemainingQty, @ProductId, 'In');
+
+                    COMMIT TRANSACTION;
+                    SELECT CAST(1 AS INT);
+                END TRY
+                BEGIN CATCH
+                    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                    THROW;
+                END CATCH;";
+
+            return _client.ExecuteScalar<int>(query, parameters, CommandType.Text) == 1;
         }
 
         public ProductUsageHistoryRes GetUsageHistory(GetProductUsageHistoryReq req)
@@ -758,7 +785,7 @@ namespace HoneyErpAPI.Repository
             p[1] = new SqlParameter("@ProductBatchId", productBatchId);
             p[2] = new SqlParameter("@SearchRemark", Utilities.DbValue(req.SearchRemark));
 
-            string query = @"SELECT remark, quantityUsed, createdAt
+            string query = @"SELECT remark, quantityUsed, entryType, createdAt
                      FROM ProductBatchUsage
                      WHERE productId = @ProductId
                      AND productBatchId = @ProductBatchId
@@ -773,6 +800,9 @@ namespace HoneyErpAPI.Repository
                 {
                     Remark = row.Field<string>("remark") ?? string.Empty,
                     QuantityUsed = row.Field<decimal>("quantityUsed"),
+                    EntryType = Enum.TryParse(row.Field<string?>("entryType"), true, out MaterialBatchEntryType entryType)
+                        ? entryType
+                        : MaterialBatchEntryType.Out,
                     UsageDate = row.Field<DateTime>("createdAt")
                 });
             }
@@ -782,13 +812,124 @@ namespace HoneyErpAPI.Repository
 
         public bool AddProductBatchUsage(ProductBatchUsage req)
         {
-            SqlParameter[] p = new SqlParameter[4];
-            p[0] = new SqlParameter("@Remark", Utilities.DbValue(req.Remark));
-            p[1] = new SqlParameter("@ProductBatchId", EncryptionHelper.Decrypt(req.ProductBatchEdid));
-            p[2] = new SqlParameter("@QuantityUsed", req.QuantityUsed);
-            p[3] = new SqlParameter("@ProductId", EncryptionHelper.Decrypt(req.ProductEdid));
+            if (req.QuantityUsed <= 0 || !Enum.IsDefined(req.EntryType))
+                return false;
 
-            return _client.ExecuteScalar<bool>("AddProductBatchUsage", p, CommandType.StoredProcedure);
+            int productBatchId = EncryptionHelper.Decrypt<int>(req.ProductBatchEdid);
+            int productId = EncryptionHelper.Decrypt<int>(req.ProductEdid);
+            return RecordProductBatchUsage(productId, productBatchId, req.QuantityUsed, req.EntryType, req.Remark);
+        }
+
+        public int CloseProductBatch(int productId, int productBatchId)
+        {
+            SqlParameter[] parameters =
+            {
+                new("@ProductId", productId),
+                new("@ProductBatchId", productBatchId)
+            };
+
+            const string query = @"
+                SET NOCOUNT ON;
+                BEGIN TRY
+                    BEGIN TRANSACTION;
+
+                    DECLARE @IsActive BIT;
+                    DECLARE @RemainingQty DECIMAL(18, 4);
+                    DECLARE @Found BIT = 0;
+
+                    SELECT @IsActive = isActive, @RemainingQty = remainingQty
+                    FROM ProductBatchMaster WITH (UPDLOCK, HOLDLOCK)
+                    WHERE id = @ProductBatchId AND productId = @ProductId;
+                    IF @@ROWCOUNT > 0 SET @Found = 1;
+
+                    IF @Found = 0
+                    BEGIN
+                        ROLLBACK TRANSACTION;
+                        SELECT CAST(0 AS INT);
+                        RETURN;
+                    END;
+
+                    IF @IsActive = 0
+                    BEGIN
+                        ROLLBACK TRANSACTION;
+                        SELECT CAST(-1 AS INT);
+                        RETURN;
+                    END;
+
+                    IF ISNULL(@RemainingQty, 0) <> 0
+                    BEGIN
+                        ROLLBACK TRANSACTION;
+                        SELECT CAST(-2 AS INT);
+                        RETURN;
+                    END;
+
+                    UPDATE ProductBatchMaster SET isActive = 0
+                    WHERE id = @ProductBatchId AND productId = @ProductId;
+
+                    COMMIT TRANSACTION;
+                    SELECT CAST(1 AS INT);
+                END TRY
+                BEGIN CATCH
+                    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                    THROW;
+                END CATCH;";
+
+            return _client.ExecuteScalar<int>(query, parameters, CommandType.Text);
+        }
+
+        private bool RecordProductBatchUsage(
+            int productId,
+            int productBatchId,
+            decimal quantity,
+            MaterialBatchEntryType entryType,
+            string? remark)
+        {
+            SqlParameter[] parameters =
+            {
+                new("@ProductId", productId),
+                new("@ProductBatchId", productBatchId),
+                new("@QuantityUsed", quantity),
+                new("@EntryType", entryType.ToString()),
+                new("@Remark", Utilities.DbValue(remark))
+            };
+
+            const string query = @"
+                SET NOCOUNT ON;
+                BEGIN TRY
+                    BEGIN TRANSACTION;
+
+                    UPDATE ProductBatchMaster
+                    SET remainingQty = CASE
+                            WHEN @EntryType = 'In' THEN ISNULL(remainingQty, 0) + @QuantityUsed
+                            ELSE ISNULL(remainingQty, 0) - @QuantityUsed
+                        END
+                    WHERE id = @ProductBatchId
+                      AND productId = @ProductId
+                      AND isActive = 1
+                      AND @QuantityUsed > 0
+                      AND (@EntryType = 'In' OR ISNULL(remainingQty, 0) >= @QuantityUsed);
+
+                    IF @@ROWCOUNT = 0
+                    BEGIN
+                        ROLLBACK TRANSACTION;
+                        SELECT CAST(0 AS INT);
+                        RETURN;
+                    END;
+
+                    INSERT INTO ProductBatchUsage
+                        (remark, productBatchId, quantityUsed, productId, entryType)
+                    VALUES
+                        (@Remark, @ProductBatchId, @QuantityUsed, @ProductId, @EntryType);
+
+                    COMMIT TRANSACTION;
+                    SELECT CAST(1 AS INT);
+                END TRY
+                BEGIN CATCH
+                    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                    THROW;
+                END CATCH;";
+
+            return _client.ExecuteScalar<int>(query, parameters, CommandType.Text) == 1;
         }
 
         public PageResult<ProductBatchListItem> GetProductBatchList(GetProductBatchListReq req)
@@ -809,6 +950,7 @@ namespace HoneyErpAPI.Repository
             p[3] = new SqlParameter("@PageSize", pageSize);
 
             string query = @"SELECT pb.id, pb.batchNumber, pb.productionQty, pb.remainingQty, pb.isActive, pb.remarks, pb.createdAt,
+                            pb.packedDate, pb.expiryDate,
                             pr.requestNumber AS productionNumber,
                             pr.id AS productionId,
                             ISNULL(u.entriesCount, 0) AS entriesCount,
@@ -825,13 +967,12 @@ namespace HoneyErpAPI.Repository
                      OUTER APPLY (
                          SELECT 
                              COUNT(1) AS entriesCount,
-                             SUM(quantityUsed) AS totalUsed,
+                             SUM(CASE WHEN pbu.entryType = 'Out' OR pbu.entryType IS NULL THEN quantityUsed ELSE 0 END) AS totalUsed,
                              MAX(createdAt) AS latestUsageDate
                          FROM ProductBatchUsage pbu
                          WHERE pbu.productBatchId = pb.id
                      ) u
                      WHERE pb.productId = @ProductId
-                     AND pb.isActive = 1
                      AND (@Search IS NULL OR pb.batchNumber LIKE '%' + @Search + '%' OR pr.requestNumber LIKE '%' + @Search + '%' OR pb.remarks LIKE '%' + @Search + '%')
                      ORDER BY pb.id DESC
                      OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
@@ -866,6 +1007,8 @@ namespace HoneyErpAPI.Repository
                     IsActive = row.Field<bool>("isActive"),
                     Remarks = remarks,
                     CreatedAt = row.Field<DateTime>("createdAt"),
+                    PackedDate = row.IsNull("packedDate") ? (DateTime?)null : row.Field<DateTime>("packedDate"),
+                    ExpiryDate = row.IsNull("expiryDate") ? (DateTime?)null : row.Field<DateTime>("expiryDate"),
                     EntriesCount = Convert.ToInt32(row["entriesCount"]),
                     TotalUsed = Convert.ToDecimal(row["totalUsed"]),
                     LatestUsageDate = row.IsNull("latestUsageDate") ? (DateTime?)null : row.Field<DateTime>("latestUsageDate")

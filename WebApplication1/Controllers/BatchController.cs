@@ -10,10 +10,12 @@ namespace HoneyErpAPI.Controllers
     public class BatchController : ControllerBase
     {
         private readonly BatchService _service;
+        private readonly MaterialBatchUsageService _materialBatchUsageService;
 
-        public BatchController(BatchService service)
+        public BatchController(BatchService service, MaterialBatchUsageService materialBatchUsageService)
         {
             _service = service;
+            _materialBatchUsageService = materialBatchUsageService;
         }
 
         [HttpGet("material/{materialEdid}")]
@@ -46,13 +48,23 @@ namespace HoneyErpAPI.Controllers
             return Ok(res);
         }
 
-        [HttpPatch("{edid}/qty")]
-        public IActionResult UpdateBatchQty(string edid, [FromBody] decimal qtyRemaining)
+        [HttpPatch("{edid}/adjustment")]
+        public IActionResult AdjustBatch(string edid, [FromBody] MaterialBatchAdjustmentReq req)
         {
             ApiResponseModel<BatchActionRes> res = new ApiResponseModel<BatchActionRes>();
-            _service.UpdateBatchQty(edid, qtyRemaining);
+            _materialBatchUsageService.AdjustBatch(edid, req);
             res.Success = true;
-            res.Message = "Batch quantity updated successfully";
+            res.Message = "Batch quantity adjusted successfully";
+            return Ok(res);
+        }
+
+        [HttpPatch("{edid}/close")]
+        public IActionResult CloseBatch(string edid)
+        {
+            ApiResponseModel<BatchActionRes> res = new ApiResponseModel<BatchActionRes>();
+            _materialBatchUsageService.CloseBatch(edid);
+            res.Success = true;
+            res.Message = "Batch closed successfully";
             return Ok(res);
         }
     }

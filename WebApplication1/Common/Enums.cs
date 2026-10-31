@@ -2,8 +2,16 @@ using System.Text.Json.Serialization;
 
 namespace HoneyErpAPI.Common
 {
+    public static class ProductBatchOptions
+    {
+        public static readonly int[] ShelfLifeMonths = { 11, 18 };
+    }
+
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum StockStatus{InStock,LowStock,OutOfStock}
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public enum MaterialBatchEntryType { In, Out }
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum ProductionStatus{Pending,Approved,InProgress,Completed,Cancelled}
@@ -50,4 +58,3 @@ namespace HoneyErpAPI.Common
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum DocumentType { Invoice, DeliverySlip, OrderReceipt, PurchaseOrder, ConfirmedOrders }
 }
-

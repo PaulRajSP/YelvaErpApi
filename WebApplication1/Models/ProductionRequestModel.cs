@@ -49,6 +49,8 @@ namespace HoneyErpAPI.Models
         public string?  RequestedBy         { get; set; }
         public decimal? ProductionUnitCost  { get; set; }   
         public DateTime CreatedAt           { get; set; }
+        public DateTime? PackedDate          { get; set; }
+        public DateTime? ExpiryDate          { get; set; }
         public List<ProductionRequestMaterialItem> Materials { get; set; } = new();
     }
 
@@ -103,6 +105,8 @@ namespace HoneyErpAPI.Models
         public string? Edid { get; set; } = string.Empty;
         public ProductionStatus Status { get; set; }
         public decimal CompletedQty { get; set; }
+        public DateTime? PackedDate { get; set; }
+        public int? ShelfLifeMonths { get; set; }
     }
 
     public class ProductionRequestActionRes : BaseApiResponse
@@ -151,6 +155,8 @@ namespace HoneyErpAPI.Models
     {
         public string materialBatchEdid { get; set; }
         public string batchNumber { get; set; }
+        public decimal qtyRemaining { get; set; }
+        public bool isActive { get; set; }
         public DateTime? latestUsageDate { get; set; }
         public int entriesCount { get; set; }
         public decimal totalUsed { get; set; }

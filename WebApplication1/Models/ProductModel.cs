@@ -229,6 +229,10 @@ namespace HoneyErpAPI.Models
         public string? ProductBatchEdid { get; set; }
         public string? BatchNumber      { get; set; }
         public decimal ProductionQty    { get; set; }
+        public int? ShelfLifeMonths     { get; set; }
+        public DateTime? PackedDate { get; set; }
+        [JsonIgnore]
+        public DateTime? ExpiryDate { get; set; }
         public string? Reason           { get; set; }
         public string? Remarks          { get; set; }
         public List<ReconcileMaterialLine> Materials { get; set; } = new();
@@ -272,8 +276,9 @@ namespace HoneyErpAPI.Models
         public string ProductEdid { get; set; } = string.Empty;
         public decimal ProducedQty { get; set; }
         public decimal AvailableQty { get; set; }
+        public DateTime PackedDate { get; set; }
+        public DateTime ExpiryDate { get; set; }
         public bool IsActive { get; set; } = true;
         public string? Remark { get; set; }
     }
 }
-

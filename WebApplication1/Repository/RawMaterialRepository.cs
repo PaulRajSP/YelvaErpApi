@@ -19,16 +19,19 @@ namespace HoneyErpAPI.Repository
         PageResult<CategoryListItem> GetCategories(GetCategoryListReq req);
         AddCategoryRes CreateCategory(AddCategoryReq req);
         PageResult<MaterialPurchaseHistoryItem> GetPurchaseHistory(string edid, GetMaterialPurchaseHistoryReq req);
-        MaterialUsageHistoryRes GetUsageHistory(GetMaterialUsageHistoryReq req);
-        bool AddMaterialBatchUsage(MaterialBatchUsage req);
-        PageResult<GetMaterialBatchListItem> GetMaterialBatchList(GetMaterialBatchListReq req);
         GetPackingMaterialsRes GetPackingMaterials(string? searchKeyword = null);
     }
 
     public class RawMaterialRepository : IRawMaterialRepository
     {
         private readonly DbClient _client;
-        public RawMaterialRepository(DbClient client) => _client = client;
+        private readonly IMaterialBatchUsageRepository _materialBatchUsageRepository;
+
+        public RawMaterialRepository(DbClient client, IMaterialBatchUsageRepository materialBatchUsageRepository)
+        {
+            _client = client;
+            _materialBatchUsageRepository = materialBatchUsageRepository;
+        }
 
 
         public PageResult<RawMaterialListItem> GetAll(GetRawMaterialListReq req)
@@ -137,6 +140,7 @@ namespace HoneyErpAPI.Repository
                 Name = row.Field<string>("name")!,
                 Category = row.Field<string>("category")!,
                 UnitEdid = EncryptionHelper.Encrypt(row.Field<int>("unitId").ToString()),
+                AllowedUnitSymbol = row.Field<string?>("allowedUnitSymbol") ?? string.Empty,
                 Stock = Convert.ToDecimal(row["stock"]),
                 MinQuantity = row.Field<decimal>("minQuantity"),
                 ReorderLevel = row.Field<decimal>("reorderLevel"),
@@ -196,26 +200,12 @@ namespace HoneyErpAPI.Repository
             int exists = _client.ExecuteScalar<int>("SELECT COUNT(1) FROM RawMaterialMaster WHERE id = @Id AND isActive = 1", checkP, CommandType.Text);
             if (exists == 0) return false;
 
-            SqlParameter[] p = new SqlParameter[2];
-            p[0] = new SqlParameter("@Id", id);
-            p[1] = new SqlParameter("@QtyChange", qtyChange);
-
-            string query = @"
-            IF EXISTS (SELECT 1 FROM MaterialBatchMaster WHERE materialId = @Id AND isActive = 1)
-            BEGIN
-                UPDATE MaterialBatchMaster 
-                SET qtyRemaining = ISNULL(qtyRemaining, 0) + @QtyChange,
-                    qtyPurchased = ISNULL(qtyPurchased, 0) + (CASE WHEN @QtyChange > 0 THEN @QtyChange ELSE 0 END)
-                WHERE id = (SELECT TOP 1 id FROM MaterialBatchMaster WHERE materialId = @Id AND isActive = 1 ORDER BY id DESC)
-            END
-            ELSE
-            BEGIN
-                INSERT INTO MaterialBatchMaster (materialId, batchNumber, qtyPurchased, qtyRemaining, isActive)
-                VALUES (@Id, 'DEFAULT', CASE WHEN @QtyChange > 0 THEN @QtyChange ELSE 0 END, @QtyChange, 1)
-            END";
-
-            _client.ExecuteNonQuery(query, p, CommandType.Text);
-            return true;
+            bool adjusted = _materialBatchUsageRepository.AdjustLatestMaterialStock(
+                int.Parse(id),
+                qtyChange);
+            if (!adjusted && qtyChange < 0)
+                throw new HoneyErpException(ErrorCode.InvalidData, "Insufficient raw material stock for this adjustment.");
+            return adjusted;
         }
 
         public GetRecipeRes GetRecipe(string productEdid)
@@ -395,114 +385,6 @@ namespace HoneyErpAPI.Repository
                     UnitPrice = row.Field<decimal>("rate"),
                     PurchaseDate = row.Field<DateTime>("date")
                 });
-            }
-
-            return res;
-        }
-
-        public MaterialUsageHistoryRes GetUsageHistory(GetMaterialUsageHistoryReq req)
-        {
-            string materialId = EncryptionHelper.Decrypt(req.MaterialEdid);
-            string materialBatchId = EncryptionHelper.Decrypt(req.MaterialBatchEdid);
-
-            MaterialUsageHistoryRes res = new MaterialUsageHistoryRes
-            {
-                Items = new List<MaterialUsageHistoryItem>()
-            };
-
-            if (string.IsNullOrWhiteSpace(materialId) || string.IsNullOrWhiteSpace(materialBatchId))
-                return res;
-
-            SqlParameter[] p = new SqlParameter[2];
-            p[0] = new SqlParameter("@MaterialId", materialId);
-            p[1] = new SqlParameter("@MaterialBatchId", materialBatchId);
-
-            string query = @"SELECT remark, quantityUsed, createdAt
-                     FROM MaterialBatchUsage
-                     WHERE materialId = @MaterialId
-                     AND materialBatchId = @MaterialBatchId
-                     ORDER BY createdAt DESC";
-
-            DataTable dt = _client.ExecuteAdapter(query, p, CommandType.Text).Tables[0];
-
-            foreach (DataRow row in dt.Rows)
-            {
-                res.Items.Add(new MaterialUsageHistoryItem
-                {
-                    Remark = row.Field<string>("remark") ?? string.Empty,
-                    QuantityUsed = row.Field<decimal>("quantityUsed"),
-                    UsageDate = row.Field<DateTime>("createdAt")
-                });
-            }
-
-            return res;
-        }
-
-        public bool AddMaterialBatchUsage(MaterialBatchUsage req)
-        {
-            SqlParameter[] p = new SqlParameter[4];
-            p[0] = new SqlParameter("@Remark", Utilities.DbValue(req.Remark));
-            p[1] = new SqlParameter("@MaterialBatchId", EncryptionHelper.Decrypt(req.MaterialBatchEdid));
-            p[2] = new SqlParameter("@QuantityUsed", req.QuantityUsed);
-            p[3] = new SqlParameter("@MaterialId", EncryptionHelper.Decrypt(req.MaterialEdid));
-
-            return _client.ExecuteScalar<bool>("AddMaterialBatchUsage", p, CommandType.StoredProcedure);
-        }
-
-
-        public PageResult<GetMaterialBatchListItem> GetMaterialBatchList(GetMaterialBatchListReq req)
-        {
-            string materialId = EncryptionHelper.Decrypt(req.materialEdid);
-
-            if (string.IsNullOrWhiteSpace(materialId))
-                return new PageResult<GetMaterialBatchListItem>();
-
-            int pageNumber = req.Pagination.PageNumber > 0 ? req.Pagination.PageNumber : 1;
-            int pageSize = req.Pagination.PageSize > 0 ? req.Pagination.PageSize : 10;
-            int offset = (pageNumber - 1) * pageSize;
-
-            SqlParameter[] p = new SqlParameter[4];
-            p[0] = new SqlParameter("@MaterialId", materialId);
-            p[1] = new SqlParameter("@Search", Utilities.DbValue(req.Search));
-            p[2] = new SqlParameter("@Offset", offset);
-            p[3] = new SqlParameter("@PageSize", pageSize);
-
-            string query = @"SELECT mb.id, mb.batchNumber, COUNT(*) OVER() AS totalCount,
-                            usageSummary.latestUsageDate, usageSummary.entriesCount, usageSummary.totalUsed
-                     FROM MaterialBatchMaster mb
-                     OUTER APPLY
-                     (
-                         SELECT MAX(mbu.createdAt) AS latestUsageDate,
-                                COUNT(*) AS entriesCount,
-                                COALESCE(SUM(mbu.quantityUsed), 0) AS totalUsed
-                         FROM MaterialBatchUsage mbu
-                         WHERE mbu.materialBatchId = mb.id
-                     ) usageSummary
-                     WHERE mb.materialId = @MaterialId
-                     AND mb.isActive = 1
-                     AND (@Search IS NULL OR mb.batchNumber LIKE '%' + @Search + '%')
-                     ORDER BY mb.id DESC
-                     OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
-
-            DataTable dt = _client.ExecuteAdapter(query, p, CommandType.Text).Tables[0];
-
-            PageResult<GetMaterialBatchListItem> res = new PageResult<GetMaterialBatchListItem>
-            {
-                TotalCount = dt.Rows.Count > 0 ? Convert.ToInt32(dt.Rows[0]["totalCount"]) : 0,
-                PageNumber = pageNumber,
-                PageSize = pageSize
-            };
-
-            foreach (DataRow row in dt.Rows)
-            {
-                GetMaterialBatchListItem item = new GetMaterialBatchListItem();
-                item.materialBatchEdid = EncryptionHelper.Encrypt(Convert.ToString(row["id"]));
-                item.batchNumber = row.Field<string>("batchNumber") ?? string.Empty;
-                item.latestUsageDate = row.Field<DateTime?>("latestUsageDate");
-                item.entriesCount = row.Field<int>("entriesCount");
-                item.totalUsed = row.Field<decimal>("totalUsed");
-
-                res.Items.Add(item);
             }
 
             return res;

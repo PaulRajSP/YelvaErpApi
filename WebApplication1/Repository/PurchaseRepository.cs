@@ -21,7 +21,13 @@ namespace HoneyErpAPI.Repository
     public class PurchaseRepository : IPurchaseRepository
     {
         private readonly DbClient _client;
-        public PurchaseRepository(DbClient client) => _client = client;
+        private readonly IMaterialBatchUsageRepository _materialBatchUsageRepository;
+
+        public PurchaseRepository(DbClient client, IMaterialBatchUsageRepository materialBatchUsageRepository)
+        {
+            _client = client;
+            _materialBatchUsageRepository = materialBatchUsageRepository;
+        }
 
         // ── Purchase ─────────────────────────────────────────────────────────
 
@@ -226,45 +232,40 @@ namespace HoneyErpAPI.Repository
                 if (!string.IsNullOrWhiteSpace(item.BatchEdid))
                 {
                     batchId = int.Parse(EncryptionHelper.Decrypt(item.BatchEdid));
-
-                    SqlParameter[] bp = new SqlParameter[2];
-                    bp[0] = new SqlParameter("@BatchId", batchId);
-                    bp[1] = new SqlParameter("@Qty", item.Qty);
-
-                    _client.ExecuteNonQuery(@"
-                UPDATE MaterialBatchMaster
-                SET qtyPurchased = ISNULL(qtyPurchased, 0) + @Qty,
-                    qtyRemaining = ISNULL(qtyRemaining, 0) + @Qty
-                WHERE id = @BatchId", bp, CommandType.Text);
                 }
                 else
                 {
-                    SqlParameter[] bp = new SqlParameter[2];
-                    bp[0] = new SqlParameter("@MaterialId", materialId);
-                    bp[1] = new SqlParameter("@Qty", item.Qty);
-
+                    SqlParameter[] bp = { new SqlParameter("@MaterialId", materialId) };
                     object? bObj = _client.ExecuteScalar<object>(@"
                         DECLARE @bId INT = (SELECT TOP 1 id FROM MaterialBatchMaster WHERE materialId = @MaterialId AND isActive = 1 ORDER BY id DESC);
                         IF @bId IS NOT NULL
                         BEGIN
-                            UPDATE MaterialBatchMaster
-                            SET qtyPurchased = ISNULL(qtyPurchased, 0) + @Qty,
-                                qtyRemaining = ISNULL(qtyRemaining, 0) + @Qty
-                            WHERE id = @bId;
+                            SELECT @bId;
                         END
                         ELSE
                         BEGIN
                             INSERT INTO MaterialBatchMaster (materialId, batchNumber, qtyPurchased, qtyRemaining, isActive)
-                            VALUES (@MaterialId, 'DEFAULT', @Qty, @Qty, 1);
+                            VALUES (@MaterialId, 'DEFAULT', 0, 0, 1);
                             SET @bId = SCOPE_IDENTITY();
+                            SELECT @bId;
                         END
-                        SELECT @bId;
                     ", bp, CommandType.Text);
 
                     if (bObj != null && int.TryParse(bObj.ToString(), out int resolvedId))
                     {
                         batchId = resolvedId;
                     }
+                }
+
+                if (!batchId.HasValue || !_materialBatchUsageRepository.Add(
+                        int.Parse(materialId),
+                        batchId.Value,
+                        item.Qty,
+                        MaterialBatchEntryType.In,
+                        $"Purchase {req.Purchase.PublicId} received {item.Qty}",
+                        updateQtyPurchased: true))
+                {
+                    throw new HoneyErpException(ErrorCode.InvalidData, "Unable to record the purchased material batch quantity.");
                 }
 
                 SqlParameter[] ip = new SqlParameter[6];

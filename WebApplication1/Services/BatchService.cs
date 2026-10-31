@@ -35,10 +35,5 @@ namespace HoneyErpAPI.Services
         
         }
 
-        public void UpdateBatchQty(string edid, decimal qtyRemaining)
-        {
-            if (!_repo.UpdateBatchQty(edid, qtyRemaining))
-                throw new HoneyErpException(ErrorCode.NotFound, "Batch not found.");
-        }
     }
 }

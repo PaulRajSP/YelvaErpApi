@@ -49,6 +49,7 @@ namespace HoneyErpAPI.Models
         public string  Name         { get; set; } = string.Empty;
         public string  Category     { get; set; } = string.Empty;
         public string  UnitEdid     { get; set; } = string.Empty;
+        public string  AllowedUnitSymbol { get; set; } = string.Empty;
         public decimal Stock        { get; set; }
         public decimal MinQuantity  { get; set; }
         public decimal ReorderLevel { get; set; }
@@ -179,6 +180,7 @@ namespace HoneyErpAPI.Models
     {
         public string Remark { get; set; }
         public decimal QuantityUsed { get; set; }
+        public MaterialBatchEntryType EntryType { get; set; } = MaterialBatchEntryType.Out;
         public DateTime UsageDate { get; set; }
     }
 }
