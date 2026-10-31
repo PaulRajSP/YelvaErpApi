@@ -77,6 +77,8 @@ namespace HoneyErpAPI.Controllers
                         attachment.FilePath.StartsWith(blobServiceUri, StringComparison.OrdinalIgnoreCase))
                     {
                         string connectionString = _config["AzureBlobStorage:ConnectionString"]
+                            ?? _config["AzureBlobStorage"]
+                            ?? _config.GetConnectionString("AzureBlobStorage")
                             ?? throw new InvalidOperationException("Azure Blob Storage connection string is missing.");
 
                         BlobServiceClient blobServiceClient = new BlobServiceClient(connectionString);

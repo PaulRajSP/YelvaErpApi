@@ -53,6 +53,8 @@ namespace HoneyErpAPI.Services
             string storedName = $"{Guid.NewGuid():N}{extension}";
 
             string connectionString = _config["AzureBlobStorage:ConnectionString"]
+                ?? _config["AzureBlobStorage"]
+                ?? _config.GetConnectionString("AzureBlobStorage")
                 ?? throw new InvalidOperationException("Azure Blob Storage connection string is missing.");
 
             string containerName = _config["AzureBlobStorage:ContainerName"]
