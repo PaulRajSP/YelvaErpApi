@@ -138,7 +138,7 @@ namespace HoneyErpAPI.Repository
             int insertedId = _client.ExecuteScalar<int>(query, p, CommandType.Text);
 
             // Record into PaymentTransactionMaster (Financial Ledger) with Category Expense
-            RecordPaymentTransactionLedger(expenseNumber, req, isPaid);
+            RecordPaymentTransactionLedger(insertedId, expenseNumber, req, isPaid);
 
             return EncryptionHelper.Encrypt(insertedId.ToString());
         }
@@ -158,22 +158,94 @@ namespace HoneyErpAPI.Repository
             DateTime expenseDate = req.ExpenseDate ?? DateTime.UtcNow;
             bool isPaid = string.Equals(req.Status, "Paid", StringComparison.OrdinalIgnoreCase);
 
-            string query = @"
-                UPDATE ExpenseMaster
-                SET title = @Title,
-                    category = @Category,
-                    amount = @Amount,
-                    expenseDate = @ExpenseDate,
-                    paymentMode = @PaymentMode,
-                    paidTo = @PaidTo,
-                    referenceNumber = @ReferenceNumber,
-                    status = @Status,
-                    remarks = @Remarks,
-                    recordedBy = COALESCE(@RecordedBy, recordedBy),
-                    updatedAt = GETUTCDATE()
-                WHERE id = @Id;";
+            string txnDesc = $"Expense: {req.Title} ({req.Category})";
+            if (!string.IsNullOrWhiteSpace(req.PaidTo))
+                txnDesc += $" - {req.PaidTo}";
+            if (!string.IsNullOrWhiteSpace(req.PaymentMode))
+                txnDesc += $" via {req.PaymentMode}";
+            if (!string.IsNullOrWhiteSpace(req.ReferenceNumber))
+                txnDesc += $" (Ref: {req.ReferenceNumber})";
+            string pRemark = txnDesc.Length > 490 ? txnDesc.Substring(0, 490) : txnDesc;
 
-            SqlParameter[] p = new SqlParameter[11];
+            string query = @"
+                SET XACT_ABORT ON;
+                BEGIN TRY
+                    BEGIN TRANSACTION;
+                    DECLARE @TransactionMasterId INT;
+
+                    UPDATE ExpenseMaster
+                    SET title = @Title,
+                        category = @Category,
+                        amount = @Amount,
+                        expenseDate = @ExpenseDate,
+                        paymentMode = @PaymentMode,
+                        paidTo = @PaidTo,
+                        referenceNumber = @ReferenceNumber,
+                        status = @Status,
+                        remarks = @Remarks,
+                        recordedBy = COALESCE(@RecordedBy, recordedBy),
+                        updatedAt = GETUTCDATE()
+                    WHERE id = @Id;
+
+                    IF @@ROWCOUNT = 0
+                        THROW 50001, 'Expense record not found.', 1;
+
+                    IF EXISTS (SELECT 1 FROM PaymentTransactionMaster WHERE transactionNumber = @ExpenseNumber)
+                    BEGIN
+                        SELECT TOP 1 @TransactionMasterId = id
+                        FROM PaymentTransactionMaster
+                        WHERE transactionNumber = @ExpenseNumber
+                        ORDER BY id DESC;
+
+                        UPDATE PaymentTransactionMaster
+                        SET remark = @Remark,
+                            amount = @Amount,
+                            status = @TransactionStatus,
+                            category = @TransactionCategory,
+                            isActive = @IsActive
+                        WHERE id = @TransactionMasterId;
+                    END
+                    ELSE
+                    BEGIN
+                        DECLARE @InsertedTransaction TABLE (id INT);
+
+                        INSERT INTO PaymentTransactionMaster
+                            (transactionNumber, remark, amount, status, category, isActive, balance, createdAt)
+                        OUTPUT INSERTED.id INTO @InsertedTransaction(id)
+                        VALUES
+                            (@ExpenseNumber, @Remark, @Amount, @TransactionStatus, @TransactionCategory, @IsActive, 0, SYSUTCDATETIME());
+
+                        SELECT @TransactionMasterId = id FROM @InsertedTransaction;
+                    END;
+
+                    UPDATE ExpenseMaster
+                    SET transactionMasterId = @TransactionMasterId
+                    WHERE id = @Id;
+
+                    ;WITH RunningBalances AS
+                    (
+                        SELECT id,
+                            SUM(CASE
+                                WHEN isActive = 1 AND UPPER(status) = 'DEBIT' THEN -amount
+                                WHEN isActive = 1 AND UPPER(status) = 'CREDIT' THEN amount
+                                ELSE 0
+                            END) OVER (ORDER BY id ROWS UNBOUNDED PRECEDING) AS calculatedBalance
+                        FROM PaymentTransactionMaster
+                    )
+                    UPDATE ledger
+                    SET balance = running.calculatedBalance
+                    FROM PaymentTransactionMaster AS ledger
+                    INNER JOIN RunningBalances AS running ON running.id = ledger.id;
+
+                    COMMIT TRANSACTION;
+                END TRY
+                BEGIN CATCH
+                    IF @@TRANCOUNT > 0
+                        ROLLBACK TRANSACTION;
+                    THROW;
+                END CATCH;";
+
+            SqlParameter[] p = new SqlParameter[16];
             p[0]  = new SqlParameter("@Id", id);
             p[1]  = new SqlParameter("@Title", req.Title ?? string.Empty);
             p[2]  = new SqlParameter("@Category", req.Category ?? string.Empty);
@@ -185,13 +257,14 @@ namespace HoneyErpAPI.Repository
             p[8]  = new SqlParameter("@Status", req.Status ?? string.Empty);
             p[9]  = new SqlParameter("@Remarks", Utilities.DbValue(req.Remarks));
             p[10] = new SqlParameter("@RecordedBy", Utilities.DbValue(req.RecordedBy));
+            p[11] = new SqlParameter("@ExpenseNumber", expenseNumber);
+            p[12] = new SqlParameter("@Remark", pRemark);
+            p[13] = new SqlParameter("@TransactionStatus", PaymentType.Debit.ToString());
+            p[14] = new SqlParameter("@TransactionCategory", TransactionCategory.Expense.ToString());
+            p[15] = new SqlParameter("@IsActive", isPaid);
 
-            bool updated = _client.ExecuteNonQuery(query, p, CommandType.Text) > 0;
-
-            // Synchronize PaymentTransactionMaster
-            SyncPaymentTransactionLedgerOnUpdate(expenseNumber, req, isPaid);
-
-            return updated;
+            _client.ExecuteNonQuery(query, p, CommandType.Text);
+            return true;
         }
 
         public bool Delete(string edid)
@@ -219,98 +292,57 @@ namespace HoneyErpAPI.Repository
             return _client.ExecuteNonQuery("DELETE FROM ExpenseMaster WHERE id = @Id;", p, CommandType.Text) > 0;
         }
         
-        private void RecordPaymentTransactionLedger(string expenseNumber, CreateExpenseReq req, bool isPaid)
+        private void RecordPaymentTransactionLedger(int expenseId, string expenseNumber, CreateExpenseReq req, bool isPaid)
         {
-            try
-            {
-                string txnDesc = $"Expense: {req.Title} ({req.Category})";
-                if (!string.IsNullOrWhiteSpace(req.PaidTo))
-                    txnDesc += $" - {req.PaidTo}";
-                if (!string.IsNullOrWhiteSpace(req.PaymentMode))
-                    txnDesc += $" via {req.PaymentMode}";
-                if (!string.IsNullOrWhiteSpace(req.ReferenceNumber))
-                    txnDesc += $" (Ref: {req.ReferenceNumber})";
-                string pRemark = txnDesc.Length > 490 ? txnDesc.Substring(0, 490) : txnDesc;
+            string txnDesc = $"Expense: {req.Title} ({req.Category})";
+            if (!string.IsNullOrWhiteSpace(req.PaidTo))
+                txnDesc += $" - {req.PaidTo}";
+            if (!string.IsNullOrWhiteSpace(req.PaymentMode))
+                txnDesc += $" via {req.PaymentMode}";
+            if (!string.IsNullOrWhiteSpace(req.ReferenceNumber))
+                txnDesc += $" (Ref: {req.ReferenceNumber})";
+            string pRemark = txnDesc.Length > 490 ? txnDesc.Substring(0, 490) : txnDesc;
 
-                SqlParameter[] lp = new SqlParameter[6];
-                lp[0] = new SqlParameter("@TransactionNumber", expenseNumber);
-                lp[1] = new SqlParameter("@Description", pRemark);
-                lp[2] = new SqlParameter("@Amount", req.Amount);
-                lp[3] = new SqlParameter("@Status", PaymentType.Debit.ToString());
-                lp[4] = new SqlParameter("@Category", TransactionCategory.Expense.ToString());
-                lp[5] = new SqlParameter("@IsActive", isPaid);
+            SqlParameter[] lp = new SqlParameter[7];
+            lp[0] = new SqlParameter("@ExpenseId", expenseId);
+            lp[1] = new SqlParameter("@TransactionNumber", expenseNumber);
+            lp[2] = new SqlParameter("@Description", pRemark);
+            lp[3] = new SqlParameter("@Amount", req.Amount);
+            lp[4] = new SqlParameter("@Status", PaymentType.Debit.ToString());
+            lp[5] = new SqlParameter("@Category", TransactionCategory.Expense.ToString());
+            lp[6] = new SqlParameter("@IsActive", isPaid);
 
-                string ledgerQuery = @"
+            string ledgerQuery = @"
+                SET XACT_ABORT ON;
+                BEGIN TRY
+                    BEGIN TRANSACTION;
                     DECLARE @PrevBalance DECIMAL(18,2) = 0;
                     SELECT TOP 1 @PrevBalance = ISNULL(balance, 0) FROM PaymentTransactionMaster ORDER BY id DESC;
+
                     DECLARE @NewBalance DECIMAL(18,2);
                     IF @IsActive = 1
                         SET @NewBalance = @PrevBalance - @Amount;
                     ELSE
                         SET @NewBalance = @PrevBalance;
 
-                    INSERT INTO PaymentTransactionMaster (transactionNumber, remark, amount, status, category, isActive, balance, createdAt) 
-                    VALUES (@TransactionNumber, @Description, @Amount, @Status, @Category, @IsActive, @NewBalance, SYSUTCDATETIME());";
+                    DECLARE @InsertedTransaction TABLE (id INT);
+                    INSERT INTO PaymentTransactionMaster (transactionNumber, remark, amount, status, category, isActive, balance, createdAt)
+                    OUTPUT INSERTED.id INTO @InsertedTransaction(id)
+                    VALUES (@TransactionNumber, @Description, @Amount, @Status, @Category, @IsActive, @NewBalance, SYSUTCDATETIME());
 
-                _client.ExecuteNonQuery(ledgerQuery, lp, CommandType.Text);
-            }
-            catch { }
-        }
+                    UPDATE ExpenseMaster
+                    SET transactionMasterId = (SELECT id FROM @InsertedTransaction)
+                    WHERE id = @ExpenseId;
 
-        private void SyncPaymentTransactionLedgerOnUpdate(string expenseNumber, UpdateExpenseReq req, bool isPaid)
-        {
-            try
-            {
-                string txnDesc = $"Expense: {req.Title} ({req.Category})";
-                if (!string.IsNullOrWhiteSpace(req.PaidTo))
-                    txnDesc += $" - {req.PaidTo}";
-                if (!string.IsNullOrWhiteSpace(req.PaymentMode))
-                    txnDesc += $" via {req.PaymentMode}";
-                if (!string.IsNullOrWhiteSpace(req.ReferenceNumber))
-                    txnDesc += $" (Ref: {req.ReferenceNumber})";
-                string pRemark = txnDesc.Length > 490 ? txnDesc.Substring(0, 490) : txnDesc;
+                    COMMIT TRANSACTION;
+                END TRY
+                BEGIN CATCH
+                    IF @@TRANCOUNT > 0
+                        ROLLBACK TRANSACTION;
+                    THROW;
+                END CATCH;";
 
-                SqlParameter[] checkP = { new SqlParameter("@TransactionNumber", expenseNumber) };
-                DataTable dt = _client.ExecuteAdapter("SELECT TOP 1 id, isActive, amount FROM PaymentTransactionMaster WHERE transactionNumber = @TransactionNumber ORDER BY id DESC;", checkP, CommandType.Text).Tables[0];
-
-                if (dt.Rows.Count > 0)
-                {
-                    SqlParameter[] upP = new SqlParameter[5];
-                    upP[0] = new SqlParameter("@TransactionNumber", expenseNumber);
-                    upP[1] = new SqlParameter("@Remark", pRemark);
-                    upP[2] = new SqlParameter("@Amount", req.Amount);
-                    upP[3] = new SqlParameter("@Category", TransactionCategory.Expense.ToString());
-                    upP[4] = new SqlParameter("@IsActive", isPaid);
-
-                    string updateSql = @"
-                        DECLARE @PrevBalance DECIMAL(18,2) = 0;
-                        SELECT TOP 1 @PrevBalance = ISNULL(balance, 0) FROM PaymentTransactionMaster ORDER BY id DESC;
-                        DECLARE @NewBalance DECIMAL(18,2);
-                        IF @IsActive = 1
-                            SET @NewBalance = @PrevBalance - @Amount;
-                        ELSE
-                            SET @NewBalance = @PrevBalance;
-
-                        UPDATE PaymentTransactionMaster 
-                        SET remark = @Remark, amount = @Amount, category = @Category, isActive = @IsActive, balance = @NewBalance
-                        WHERE transactionNumber = @TransactionNumber;";
-                    _client.ExecuteNonQuery(updateSql, upP, CommandType.Text);
-                }
-                else
-                {
-                    var cReq = new CreateExpenseReq
-                    {
-                        Title = req.Title,
-                        Category = req.Category,
-                        Amount = req.Amount,
-                        PaymentMode = req.PaymentMode,
-                        PaidTo = req.PaidTo,
-                        ReferenceNumber = req.ReferenceNumber
-                    };
-                    RecordPaymentTransactionLedger(expenseNumber, cReq, isPaid);
-                }
-            }
-            catch { }
+            _client.ExecuteNonQuery(ledgerQuery, lp, CommandType.Text);
         }
 
         public ExpenseSummaryRes GetSummary(DateTime? fromDate, DateTime? toDate)
