@@ -24,7 +24,7 @@ namespace HoneyErpAPI.Repository
         SavePackageRes SavePackage(string orderEdid, SavePackageReq req);
         GetOrderFullDetailsRes? GetOrderFullDetails(string orderNumber, string? orderEdid = null);
 
-        bool ConfirmOrder(string edid, string? changedBy = null);
+        bool ConfirmOrder(string edid, int? courierId = null, string? changedBy = null);
         List<OrderProductItemDto> GetOrderProductItems(int orderId);
         GetOrderBottlesRes GetOrderBottles(string orderNumber);
         GetOrderPackingDetailsRes? GetOrderPackingDetails(string orderNumber);
@@ -421,8 +421,43 @@ namespace HoneyErpAPI.Repository
             return success;
         }
 
-        public bool ConfirmOrder(string edid, string? changedBy = null)
+        public bool ConfirmOrder(string edid, int? courierId = null, string? changedBy = null)
         {
+            if (courierId.HasValue)
+            {
+                int orderId = EncryptionHelper.Decrypt<int>(edid);
+                if (orderId <= 0)
+                    return false;
+
+                SqlParameter[] courierP = { new SqlParameter("@CourierId", courierId.Value) };
+                object? activeCourier = _client.ExecuteScalar<object>(
+                    "SELECT id FROM CourierMaster WHERE id = @CourierId AND isActive = 1",
+                    courierP,
+                    CommandType.Text);
+
+                if (activeCourier == null)
+                    throw new HoneyErpException(ErrorCode.InvalidData, "The selected courier is not active or does not exist.");
+
+                SqlParameter[] handoverP =
+                {
+                    new SqlParameter("@OrderId", orderId),
+                    new SqlParameter("@CourierId", courierId.Value)
+                };
+                string assignCourierSql = @"
+                    IF EXISTS (SELECT 1 FROM CourierHandover WHERE orderMasterId = @OrderId)
+                    BEGIN
+                        UPDATE CourierHandover
+                        SET courierId = @CourierId
+                        WHERE orderMasterId = @OrderId;
+                    END
+                    ELSE
+                    BEGIN
+                        INSERT INTO CourierHandover (orderMasterId, courierId)
+                        VALUES (@OrderId, @CourierId);
+                    END";
+                _client.ExecuteNonQuery(assignCourierSql, handoverP, CommandType.Text);
+            }
+
             return UpdateStatus(edid, OrderStatus.Confirmed, "Order confirmed and physical bottles generated", changedBy ?? "EMP001");
         }
 
@@ -1468,11 +1503,22 @@ namespace HoneyErpAPI.Repository
                 }
             }
 
-            // Fallback to 1 (default active courier) if none matched
+            // Dispatch uses the courier assigned at order confirmation.
             if (courierId == 0)
             {
-                var firstCid = _client.ExecuteScalar<object>("SELECT TOP 1 id FROM CourierMaster WHERE isActive = 1 ORDER BY id ASC", null, CommandType.Text);
-                courierId = firstCid != null && int.TryParse(firstCid.ToString(), out int fc) ? fc : 1;
+                SqlParameter[] assignedCourierP = { new SqlParameter("@OrderId", orderId) };
+                var assignedCourier = _client.ExecuteScalar<object>(
+                    "SELECT courierId FROM CourierHandover WHERE orderMasterId = @OrderId",
+                    assignedCourierP,
+                    CommandType.Text);
+                courierId = assignedCourier != null && int.TryParse(assignedCourier.ToString(), out int assignedId)
+                    ? assignedId
+                    : 0;
+            }
+
+            if (courierId <= 0)
+            {
+                throw new HoneyErpException(ErrorCode.InvalidData, "A courier partner must be assigned before dispatch.");
             }
 
             // 3. Resolve TrackingNumber

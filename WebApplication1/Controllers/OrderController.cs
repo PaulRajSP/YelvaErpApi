@@ -192,9 +192,9 @@ namespace HoneyErpAPI.Controllers
         }
 
         [HttpPost("{edid}/confirm")]
-        public IActionResult ConfirmOrder(string edid)
+        public IActionResult ConfirmOrder(string edid, [FromBody] ConfirmOrderReq req)
         {
-            _service.ConfirmOrder(edid);
+            _service.ConfirmOrder(edid, req);
             ApiResponseModel<OrderActionRes> res = new ApiResponseModel<OrderActionRes>();
             res.Success = true;
             res.Message = "Order confirmed successfully and physical bottles created.";

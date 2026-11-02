@@ -121,14 +121,33 @@ namespace HoneyErpAPI.Services
             return order;
         }
 
-        public void ConfirmOrder(string orderEdid)
+        public void ConfirmOrder(string orderEdid, ConfirmOrderReq req)
         {
             if (string.IsNullOrWhiteSpace(orderEdid))
                 throw new HoneyErpException(ErrorCode.InvalidData, "Order EDID is required.");
 
+            GetOrderByIdRes? order = _repo.GetById(orderEdid);
+            if (order == null)
+                throw new HoneyErpException(ErrorCode.NotFound, "Order not found.");
+
+            bool requiresCourier = !string.Equals(order.DeliveryType, "DIRECT", StringComparison.OrdinalIgnoreCase);
+            int? courierId = null;
+            if (requiresCourier && !string.IsNullOrWhiteSpace(req.CourierEdid))
+            {
+                string decryptedCourierId = EncryptionHelper.Decrypt(req.CourierEdid);
+                if (!int.TryParse(decryptedCourierId, out int resolvedCourierId) || resolvedCourierId <= 0)
+                    throw new HoneyErpException(ErrorCode.InvalidData, "The selected courier is invalid.");
+
+                courierId = resolvedCourierId;
+            }
+            if (requiresCourier && (!courierId.HasValue || courierId.Value <= 0))
+            {
+                throw new HoneyErpException(ErrorCode.InvalidData, "A courier provider is required for courier delivery.");
+            }
+
             string confirmedBy = _currentUserService.EmployeeCode ?? "EMP001";
 
-            if (!_repo.ConfirmOrder(orderEdid, confirmedBy))
+            if (!_repo.ConfirmOrder(orderEdid, courierId, confirmedBy))
                 throw new HoneyErpException(ErrorCode.NotFound, "Order not found or could not be confirmed.");
         }
 
@@ -224,9 +243,6 @@ namespace HoneyErpAPI.Services
         {
             if (string.IsNullOrWhiteSpace(req.OrderEdid))
                 throw new HoneyErpException(ErrorCode.InvalidData, "Order EDID is required.");
-
-            if (string.IsNullOrWhiteSpace(req.Courier))
-                throw new HoneyErpException(ErrorCode.InvalidData, "Courier provider is required.");
 
             if (string.IsNullOrWhiteSpace(req.Tracking))
                 throw new HoneyErpException(ErrorCode.InvalidData, "Tracking / AWB number is required.");

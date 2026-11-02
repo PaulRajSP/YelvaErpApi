@@ -168,6 +168,11 @@ namespace HoneyErpAPI.Models
     // ── No-data response ──────────────────────────────────────────────────────
     public class OrderActionRes : BaseApiResponse { }
 
+    public class ConfirmOrderReq
+    {
+        public string? CourierEdid { get; set; }
+    }
+
     // ── Get Order Full Details (Order + Customer + Address + Package + Products) ──
     public class GetOrderFullDetailsRes : BaseApiResponse
     {
